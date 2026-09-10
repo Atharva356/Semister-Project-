@@ -84,3 +84,6 @@ AgriMandi/
 ## 👨‍💻 Author
 
 - **Atharva Chavan** ([@Atharva356](https://github.com/Atharva356))
+- Aryan Nerkar
+- Krishna Mistri
+- Gaurav Patil
