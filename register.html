@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Register — AgriMandi</title>
+  <meta name="description" content="Join AgriMandi as a farmer to list produce or as a buyer to purchase directly." />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Site Navigation -->
+  <header class="site-header">
+    <div class="container nav-container">
+      <a href="index.html" class="logo">
+        <span class="logo-icon">🌾</span>
+        <span>AgriMandi</span>
+      </a>
+
+      <nav>
+        <ul class="nav-menu">
+          <li><a href="index.html" class="nav-link">Home</a></li>
+          <li><a href="buyer-dashboard.html" class="nav-link">Marketplace</a></li>
+        </ul>
+      </nav>
+
+      <div class="nav-auth-buttons">
+        <a href="login.html" class="btn btn-outline btn-sm">Already Registered? Log In</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container">
+      
+      <div class="auth-wrapper">
+        <div class="auth-card">
+          <div class="auth-header">
+            <span style="font-size: 2.2rem; display: inline-block; margin-bottom: 8px;">🌱</span>
+            <h1>Create Account</h1>
+            <p>Join India's direct farm-to-buyer network</p>
+          </div>
+
+          <!-- Register Form -->
+          <form id="registerForm" novalidate>
+            <div class="form-group">
+              <label for="name" class="form-label">Full Name / Farm or Business Name</label>
+              <input 
+                type="text" 
+                id="name" 
+                class="form-control" 
+                placeholder="e.g. Ramesh Patel or Fresh Kitchens Ltd" 
+                required 
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="email" class="form-label">Email Address</label>
+              <input 
+                type="email" 
+                id="email" 
+                class="form-control" 
+                placeholder="name@example.com" 
+                required 
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="password" class="form-label">Create Password</label>
+              <input 
+                type="password" 
+                id="password" 
+                class="form-control" 
+                placeholder="Minimum 6 characters" 
+                required 
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="role" class="form-label">I want to join as</label>
+              <select id="role" class="form-select" required>
+                <option value="farmer">🚜 Farmer (I want to sell my produce)</option>
+                <option value="buyer">🛒 Buyer (I want to buy fresh produce)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="location" class="form-label">City & State / Location</label>
+              <input 
+                type="text" 
+                id="location" 
+                class="form-control" 
+                placeholder="e.g. Nashik, Maharashtra" 
+              />
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-block btn-lg" id="registerSubmitBtn">
+              Create My Account
+            </button>
+          </form>
+
+          <div class="auth-footer">
+            Already have an account? <a href="login.html">Sign in here</a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Site Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-bottom">
+        <p>&copy; 2026 AgriMandi. All rights reserved. Direct Farmer-to-Buyer Marketplace.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+  <script>
+    // Pre-select role if passed in query param
+    const urlParams = new URLSearchParams(window.location.search);
+    const roleParam = urlParams.get('role');
+    if (roleParam && (roleParam === 'farmer' || roleParam === 'buyer')) {
+      const roleSelect = document.getElementById('role');
+      if (roleSelect) roleSelect.value = roleParam;
+    }
+  </script>
+</body>
+</html>

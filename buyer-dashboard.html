@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Buyer Marketplace — AgriMandi</title>
+  <meta name="description" content="Browse and purchase farm-fresh agricultural crops directly from local farmers." />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Site Navigation -->
+  <header class="site-header">
+    <div class="container nav-container">
+      <a href="index.html" class="logo">
+        <span class="logo-icon">🌾</span>
+        <span>AgriMandi</span>
+      </a>
+
+      <nav>
+        <ul class="nav-menu">
+          <li><a href="index.html" class="nav-link">Home</a></li>
+          <li><a href="buyer-dashboard.html" class="nav-link active">Marketplace</a></li>
+          <li><a href="farmer-dashboard.html" class="nav-link">Farmer Portal</a></li>
+        </ul>
+      </nav>
+
+      <div class="nav-auth-buttons">
+        <span class="badge badge-green">🛒 Buyer Portal</span>
+        <a href="farmer-dashboard.html" class="btn btn-outline btn-sm">Switch to Farmer View</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container">
+      
+      <!-- Marketplace Header -->
+      <div class="dashboard-header">
+        <div class="dashboard-title-group">
+          <h1>Direct Farm Marketplace</h1>
+          <p>Browse fresh harvests directly from verified growers with zero middleman commissions.</p>
+        </div>
+        <div id="resultsCount" style="color: var(--text-muted); font-weight: 600; font-size: 0.95rem;">
+          Loading listings...
+        </div>
+      </div>
+
+      <!-- Search & Filter Controls -->
+      <section class="filter-bar">
+        <!-- Search Input -->
+        <div class="search-input-wrapper">
+          <span class="search-icon">🔍</span>
+          <input 
+            type="text" 
+            id="searchInput" 
+            class="form-control search-input" 
+            placeholder="Search crop name, location, or farmer..." 
+          />
+        </div>
+
+        <!-- Category Dropdown Filter -->
+        <div>
+          <select id="categoryFilter" class="form-select">
+            <option value="">All Categories</option>
+            <option value="Vegetables">Vegetables</option>
+            <option value="Fruits">Fruits</option>
+            <option value="Grains">Grains & Cereals</option>
+            <option value="Pulses">Pulses & Lentils</option>
+            <option value="Spices">Spices & Herbs</option>
+          </select>
+        </div>
+
+        <!-- Location Dropdown Filter -->
+        <div>
+          <select id="locationFilter" class="form-select">
+            <option value="">All Locations</option>
+          </select>
+        </div>
+
+        <!-- Reset Button -->
+        <div>
+          <button type="button" class="btn btn-outline btn-block" id="resetFiltersBtn">
+            ↺ Reset
+          </button>
+        </div>
+      </section>
+
+      <!-- Produce Cards Grid -->
+      <section>
+        <div class="produce-grid" id="produceGrid">
+          <!-- Populated dynamically by app.js -->
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- Site Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <div class="logo">
+            <span class="logo-icon">🌾</span>
+            <span>AgriMandi</span>
+          </div>
+          <p>Direct Farmer-to-Buyer Produce Marketplace</p>
+        </div>
+        <ul class="footer-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="buyer-dashboard.html">Marketplace</a></li>
+          <li><a href="farmer-dashboard.html">List Produce</a></li>
+        </ul>
+      </div>
+      <div class="footer-bottom">
+        <p>&copy; 2026 AgriMandi. All rights reserved. Direct Farmer-to-Buyer Marketplace.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

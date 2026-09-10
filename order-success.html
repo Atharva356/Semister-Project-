@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Order Confirmed — AgriMandi</title>
+  <meta name="description" content="Your direct farm order has been successfully placed on AgriMandi." />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Site Navigation -->
+  <header class="site-header">
+    <div class="container nav-container">
+      <a href="index.html" class="logo">
+        <span class="logo-icon">🌾</span>
+        <span>AgriMandi</span>
+      </a>
+
+      <nav>
+        <ul class="nav-menu">
+          <li><a href="index.html" class="nav-link">Home</a></li>
+          <li><a href="buyer-dashboard.html" class="nav-link">Marketplace</a></li>
+        </ul>
+      </nav>
+
+      <div class="nav-auth-buttons">
+        <a href="buyer-dashboard.html" class="btn btn-outline btn-sm">Browse More Crops</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="container">
+      
+      <div class="success-wrapper">
+        <div class="success-card">
+          <div class="success-icon-wrapper">
+            ✓
+          </div>
+
+          <h1 class="success-title">Order Placed Successfully!</h1>
+          <p class="success-subtitle">
+            Thank you for supporting local growers directly. Your order has been notified to the farmer for harvest dispatch.
+          </p>
+
+          <!-- Dynamic Order Summary Details -->
+          <div class="order-summary-box" id="orderSummaryDetails">
+            <!-- Rendered by app.js -->
+          </div>
+
+          <div class="success-actions">
+            <a href="buyer-dashboard.html" class="btn btn-primary">
+              🛒 Continue Shopping
+            </a>
+            <a href="index.html" class="btn btn-outline">
+              🏠 Back to Home
+            </a>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <!-- Site Footer -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-bottom">
+        <p>&copy; 2026 AgriMandi. All rights reserved. Direct Farmer-to-Buyer Marketplace.</p>
+      </div>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
