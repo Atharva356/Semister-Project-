@@ -85,5 +85,5 @@ AgriMandi/
 
 - **Atharva Chavan** ([@Atharva356](https://github.com/Atharva356))
 - Aryan Nerkar
-- Krushna Mistari 
+- Krushna Mistari(@krushnagajananmistari)
 - Gaurav Patil(@Gauravpatil25)
