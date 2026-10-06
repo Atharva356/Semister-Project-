@@ -56,3 +56,105 @@ def test_startup_check_raises_in_production(monkeypatch):
     monkeypatch.setenv("RENDER", "true")
     with pytest.raises(RuntimeError, match="USE_MEMORY_DB cannot be enabled in production"):
         create_app()
+
+
+def test_place_order_ignores_client_supplied_buyer_id(client, buyer_auth_headers):
+    """
+    Assert that client-supplied buyerId/buyer_id in the payload is ignored
+    and the order is strictly associated with the authenticated user's ID.
+    """
+    spoofed_buyer_id = "attacker-evil-uuid-999"
+    payload = {
+        "produceId": "prod-1",
+        "quantity": 2,
+        "deliveryAddress": "456 Cyber St, Pune",
+        "buyerId": spoofed_buyer_id,
+        "buyer_id": spoofed_buyer_id
+    }
+    res = client.post("/api/orders", json=payload, headers=buyer_auth_headers)
+    assert res.status_code == 201
+    data = res.get_json()["data"]
+
+    # Order must NOT be placed under the spoofed buyer ID
+    assert data["buyerId"] != spoofed_buyer_id
+    assert data["buyerId"] == "buyer-demo-uuid-1"
+
+    # Verify db record
+    placed_order = db.get_order_by_id(data["orderId"])
+    assert placed_order["buyer_id"] == "buyer-demo-uuid-1"
+    assert placed_order["buyer_id"] != spoofed_buyer_id
+
+
+def test_order_cancellation_restores_stock_buyer(client, buyer_auth_headers):
+    """
+    Cancelling an order as a buyer (in Pending status) must restore the produce stock.
+    """
+    initial_prod = db.get_produce_by_id("prod-1")
+    initial_stock = float(initial_prod["quantity"])
+    order_qty = 5.0
+
+    # Place order
+    res = client.post("/api/orders", json={
+        "produceId": "prod-1",
+        "quantity": order_qty,
+        "deliveryAddress": "Buyer Address, Pune"
+    }, headers=buyer_auth_headers)
+    assert res.status_code == 201
+    order_id = res.get_json()["data"]["orderId"]
+
+    # Produce stock is reduced
+    prod_after_order = db.get_produce_by_id("prod-1")
+    assert float(prod_after_order["quantity"]) == initial_stock - order_qty
+
+    # Ensure status is Pending for buyer cancellation
+    for o in db._orders_store:
+        if o.get("order_id") == order_id:
+            o["status"] = "Pending"
+
+    # Buyer cancels
+    cancel_res = client.patch(
+        f"/api/orders/{order_id}/status",
+        json={"status": "Cancelled"},
+        headers=buyer_auth_headers
+    )
+    assert cancel_res.status_code == 200
+    assert cancel_res.get_json()["data"]["status"] == "Cancelled"
+
+    # Stock is fully restored
+    prod_after_cancel = db.get_produce_by_id("prod-1")
+    assert float(prod_after_cancel["quantity"]) == initial_stock
+
+
+def test_order_cancellation_restores_stock_farmer(client, buyer_auth_headers, farmer_auth_headers):
+    """
+    Cancelling an order as a farmer (in Pending or Confirmed status) must restore the produce stock.
+    """
+    initial_prod = db.get_produce_by_id("prod-1")
+    initial_stock = float(initial_prod["quantity"])
+    order_qty = 7.0
+
+    # Place order by buyer
+    res = client.post("/api/orders", json={
+        "produceId": "prod-1",
+        "quantity": order_qty,
+        "deliveryAddress": "Buyer Farm Road, Pune"
+    }, headers=buyer_auth_headers)
+    assert res.status_code == 201
+    order_id = res.get_json()["data"]["orderId"]
+
+    # Stock decremented
+    prod_after_order = db.get_produce_by_id("prod-1")
+    assert float(prod_after_order["quantity"]) == initial_stock - order_qty
+
+    # Farmer cancels the Confirmed order
+    cancel_res = client.patch(
+        f"/api/orders/{order_id}/status",
+        json={"status": "Cancelled"},
+        headers=farmer_auth_headers
+    )
+    assert cancel_res.status_code == 200
+    assert cancel_res.get_json()["data"]["status"] == "Cancelled"
+
+    # Stock restored back to initial level
+    prod_after_cancel = db.get_produce_by_id("prod-1")
+    assert float(prod_after_cancel["quantity"]) == initial_stock
