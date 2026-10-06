@@ -1,80 +1,18 @@
 /**
  * ==============================================================================
- * AgriMandi - Main Application Logic (app.js)
+ * AgriMandi - Main Application Logic (app.js) - Version 2.0
  * Direct Farmer-to-Buyer Marketplace
- * 
- * NOTE FOR BACKEND DEVELOPERS (Flask / REST API integration):
- * All state management currently uses an in-memory JS array persisted in localStorage.
- * Look for "BACKEND INTEGRATION HOOK" comments across this file to plug in
- * your Flask endpoints (e.g. /api/produce, /api/auth/login, /api/orders).
+ * Pure Vanilla JavaScript (No frameworks, No build step)
+ *
+ * Architecture:
+ * - Supabase Auth for client sessions and JWT tokens
+ * - Flask REST API for produce and orders (/api/produce, /api/orders)
+ * - Authoritative roles loaded from `profiles` table
+ * - Strict XSS protection via escapeHtml()
  * ==============================================================================
  */
 
-// --- Default Seed Mock Data ---
-const DEFAULT_PRODUCE = [
-  {
-    id: "prod-1",
-    name: "Sharbati Wheat",
-    category: "Grains",
-    quantity: 50,
-    unit: "Quintal",
-    price: 3200,
-    location: "Sehore, Madhya Pradesh",
-    farmerName: "Rameshwar Patel",
-    image: "https://images.unsplash.com/photo-1574323347407-f5e1ad6d020b?auto=format&fit=crop&w=600&q=80",
-    dateAdded: "2026-09-08"
-  },
-  {
-    id: "prod-2",
-    name: "Organic Red Hybrid Tomatoes",
-    category: "Vegetables",
-    quantity: 250,
-    unit: "Kg",
-    price: 28,
-    location: "Nashik, Maharashtra",
-    farmerName: "Sanjay Deshmukh",
-    image: "https://images.unsplash.com/photo-1592924357228-91a4daadcfea?auto=format&fit=crop&w=600&q=80",
-    dateAdded: "2026-09-09"
-  },
-  {
-    id: "prod-3",
-    name: "Royal Delicious Shimla Apples",
-    category: "Fruits",
-    quantity: 120,
-    unit: "Crates",
-    price: 1450,
-    location: "Shimla, Himachal Pradesh",
-    farmerName: "Baldev Chauhan",
-    image: "https://images.unsplash.com/photo-1560806887-1e4cd0b6cbd6?auto=format&fit=crop&w=600&q=80",
-    dateAdded: "2026-09-07"
-  },
-  {
-    id: "prod-4",
-    name: "Kolar Fresh Red Onions",
-    category: "Vegetables",
-    quantity: 400,
-    unit: "Kg",
-    price: 34,
-    location: "Kolar, Karnataka",
-    farmerName: "Narayana Gowda",
-    image: "https://images.unsplash.com/photo-1618512496248-a07fe83aa8cb?auto=format&fit=crop&w=600&q=80",
-    dateAdded: "2026-09-09"
-  },
-  {
-    id: "prod-5",
-    name: "Traditional Basmati Rice (Pusa 1121)",
-    category: "Grains",
-    quantity: 35,
-    unit: "Quintal",
-    price: 4600,
-    location: "Karnal, Haryana",
-    farmerName: "Gurpreet Singh",
-    image: "https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=600&q=80",
-    dateAdded: "2026-09-06"
-  }
-];
-
-// Fallback images by category when farmer doesn't upload one
+// Category fallback preview images
 const CATEGORY_IMAGES = {
   Vegetables: "https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=600&q=80",
   Fruits: "https://images.unsplash.com/photo-1619566636858-adf3ef46400b?auto=format&fit=crop&w=600&q=80",
@@ -84,49 +22,39 @@ const CATEGORY_IMAGES = {
 };
 
 // ==============================================================================
-// 1. DATA ACCESS LAYER (Mock Storage with LocalStorage Persistence)
+// 1. SECURITY & UTILITY HELPERS
 // ==============================================================================
 
 /**
- * BACKEND INTEGRATION HOOK:
- * When connecting Flask backend, replace this with:
- * return await fetch('/api/produce').then(res => res.json());
+ * XSS Sanitizer: Encodes HTML entities in user-controlled strings
  */
-function getProduceList() {
-  const stored = localStorage.getItem("agrimandi_produce");
-  if (!stored) {
-    localStorage.setItem("agrimandi_produce", JSON.stringify(DEFAULT_PRODUCE));
-    return [...DEFAULT_PRODUCE];
-  }
-  try {
-    return JSON.parse(stored);
-  } catch (e) {
-    console.error("Error reading localStorage produce data:", e);
-    return [...DEFAULT_PRODUCE];
-  }
+function escapeHtml(str) {
+  if (str === null || str === undefined) return "";
+  return String(str)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
 }
 
 /**
- * Saves current produce list to localStorage
+ * Validates and sanitizes image URLs (http/https only)
  */
-function saveProduceList(items) {
-  localStorage.setItem("agrimandi_produce", JSON.stringify(items));
+function sanitizeImageUrl(url, fallbackCategory = "Vegetables") {
+  if (!url || typeof url !== "string") {
+    return CATEGORY_IMAGES[fallbackCategory] || CATEGORY_IMAGES.Vegetables;
+  }
+  const trimmed = url.trim();
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("data:image/")) {
+    return escapeHtml(trimmed);
+  }
+  return CATEGORY_IMAGES[fallbackCategory] || CATEGORY_IMAGES.Vegetables;
 }
 
-// Current User Session Helper
-function getCurrentUser() {
-  const user = localStorage.getItem("agrimandi_user");
-  return user ? JSON.parse(user) : null;
-}
-
-function setCurrentUser(user) {
-  localStorage.setItem("agrimandi_user", JSON.stringify(user));
-}
-
-// ==============================================================================
-// 2. COMMON UTILITIES & TOAST NOTIFICATIONS
-// ==============================================================================
-
+/**
+ * Toast Notification system
+ */
 function showToast(message, type = "success") {
   let container = document.querySelector(".toast-container");
   if (!container) {
@@ -139,7 +67,7 @@ function showToast(message, type = "success") {
   toast.className = `toast ${type === "error" ? "toast-error" : ""}`;
   toast.innerHTML = `
     <span>${type === "error" ? "⚠️" : "✅"}</span>
-    <span>${message}</span>
+    <span>${escapeHtml(message)}</span>
   `;
 
   container.appendChild(toast);
@@ -151,33 +79,111 @@ function showToast(message, type = "success") {
     setTimeout(() => toast.remove(), 300);
   }, 3500);
 }
+window.showToast = showToast;
 
+/**
+ * Formats amount into Indian Rupee (INR) representation
+ */
 function formatCurrency(amount) {
+  const num = Number(amount) || 0;
   return new Intl.NumberFormat("en-IN", {
     style: "currency",
     currency: "INR",
     maximumFractionDigits: 0
-  }).format(amount);
+  }).format(num);
+}
+
+function showInputError(fieldId, message) {
+  const input = document.getElementById(fieldId);
+  if (!input) return;
+  input.classList.add("is-invalid");
+  let errorEl = input.nextElementSibling;
+  if (!errorEl || !errorEl.classList.contains("error-message")) {
+    errorEl = document.createElement("div");
+    errorEl.className = "error-message";
+    input.parentNode.appendChild(errorEl);
+  }
+  errorEl.textContent = message;
+  errorEl.style.display = "block";
+}
+
+function clearInputError(fieldId) {
+  const input = document.getElementById(fieldId);
+  if (!input) return;
+  input.classList.remove("is-invalid");
+  const errorEl = input.nextElementSibling;
+  if (errorEl && errorEl.classList.contains("error-message")) {
+    errorEl.style.display = "none";
+  }
 }
 
 // ==============================================================================
-// 3. AUTHENTICATION & VALIDATION (Login / Register)
+// 2. AUTHENTICATION & ROLE GUARDS
 // ==============================================================================
 
+/**
+ * Strict Role Guard on Page Load
+ * Reads authoritative role from Supabase profiles table.
+ * Redirects unauthorized users immediately.
+ */
+async function enforceRoleGuards() {
+  const path = window.location.pathname;
+  const isFarmerPage = path.includes("farmer-dashboard.html");
+  const isBuyerPage = path.includes("buyer-dashboard.html");
+  const isAuthPage = path.includes("login.html") || path.includes("register.html");
+
+  if (!window.agriMandiSupabase) return;
+
+  const currentUser = await window.agriMandiSupabase.getCurrentUser();
+
+  // Protected farmer portal
+  if (isFarmerPage) {
+    if (!currentUser) {
+      window.location.replace("login.html?role=farmer");
+      return;
+    }
+    if (currentUser.role !== "farmer") {
+      showToast("Access restricted: Farmer portal requires a registered farmer profile.", "error");
+      setTimeout(() => window.location.replace("buyer-dashboard.html"), 1200);
+      return;
+    }
+  }
+
+  // Protected buyer marketplace
+  if (isBuyerPage) {
+    if (!currentUser) {
+      window.location.replace("login.html?role=buyer");
+      return;
+    }
+    if (currentUser.role === "farmer") {
+      // Guide farmers to portal if they navigate to marketplace
+      // Farmers can view marketplace for price checks, but portal is primary
+    }
+  }
+
+  // If already logged in, redirect away from login/register
+  if (isAuthPage && currentUser) {
+    if (currentUser.role === "farmer") {
+      window.location.replace("farmer-dashboard.html");
+    } else {
+      window.location.replace("buyer-dashboard.html");
+    }
+  }
+}
+
+/**
+ * Login and Registration form bindings
+ */
 function initAuthForms() {
-  // Login Form Handler
   const loginForm = document.getElementById("loginForm");
   if (loginForm) {
     loginForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const email = document.getElementById("email").value.trim();
       const password = document.getElementById("password").value.trim();
-      const role = document.getElementById("role").value;
       const submitBtn = document.getElementById("loginSubmitBtn");
 
       let isValid = true;
-
-      // Email validation
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!email || !emailRegex.test(email)) {
         showInputError("email", "Please enter a valid email address");
@@ -186,7 +192,6 @@ function initAuthForms() {
         clearInputError("email");
       }
 
-      // Password validation
       if (!password || password.length < 6) {
         showInputError("password", "Password must be at least 6 characters");
         isValid = false;
@@ -201,17 +206,8 @@ function initAuthForms() {
         submitBtn.textContent = "Verifying with Supabase...";
       }
 
-      // Verify that Supabase authentication module is loaded
-      if (!window.agriMandiSupabase || !window.agriMandiSupabase.isConfigured()) {
-        showToast("Supabase is not configured yet. Please check your credentials.", "error");
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = "Sign In to AgriMandi";
-        }
-        return;
-      }
-
       const result = await window.agriMandiSupabase.signIn(email, password);
+
       if (result.error) {
         showToast(result.error.message || "Invalid email or password", "error");
         if (submitBtn) {
@@ -221,8 +217,10 @@ function initAuthForms() {
         return;
       }
 
-      if (!result.user) {
-        showToast("Invalid credentials. Please check your email and password.", "error");
+      // Query authoritative role from profiles table
+      const user = await window.agriMandiSupabase.getCurrentUser();
+      if (!user) {
+        showToast("Authenticated, but could not load profile.", "error");
         if (submitBtn) {
           submitBtn.disabled = false;
           submitBtn.textContent = "Sign In to AgriMandi";
@@ -230,30 +228,18 @@ function initAuthForms() {
         return;
       }
 
-      const meta = result.user.user_metadata || {};
-      const user = {
-        id: result.user.id,
-        name: meta.name || meta.full_name || email.split("@")[0].replace(".", " "),
-        email: result.user.email || email,
-        role: meta.role || role,
-        location: meta.location || "India"
-      };
-
-      setCurrentUser(user);
       showToast(`Welcome back, ${user.name}! Redirecting...`);
 
-      // Role-based redirection
       setTimeout(() => {
         if (user.role === "farmer") {
           window.location.href = "farmer-dashboard.html";
         } else {
           window.location.href = "buyer-dashboard.html";
         }
-      }, 900);
+      }, 700);
     });
   }
 
-  // Register Form Handler
   const registerForm = document.getElementById("registerForm");
   if (registerForm) {
     registerForm.addEventListener("submit", async (e) => {
@@ -266,7 +252,6 @@ function initAuthForms() {
       const submitBtn = document.getElementById("registerSubmitBtn");
 
       let isValid = true;
-
       if (!name) {
         showInputError("name", "Full name is required");
         isValid = false;
@@ -296,17 +281,8 @@ function initAuthForms() {
         submitBtn.textContent = "Creating account in Supabase...";
       }
 
-      // Verify that Supabase authentication module is loaded
-      if (!window.agriMandiSupabase || !window.agriMandiSupabase.isConfigured()) {
-        showToast("Supabase is not configured yet. Please check your credentials.", "error");
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = "Create My Account";
-        }
-        return;
-      }
-
       const result = await window.agriMandiSupabase.signUp(email, password, { name, role, location });
+
       if (result.error) {
         showToast(result.error.message || "Registration failed", "error");
         if (submitBtn) {
@@ -316,24 +292,6 @@ function initAuthForms() {
         return;
       }
 
-      if (!result.user) {
-        showToast("Registration failed. Please check your details.", "error");
-        if (submitBtn) {
-          submitBtn.disabled = false;
-          submitBtn.textContent = "Create My Account";
-        }
-        return;
-      }
-
-      const user = {
-        id: result.user.id,
-        name: name,
-        email: email,
-        role: role,
-        location: location || "Maharashtra, India"
-      };
-
-      setCurrentUser(user);
       showToast("Account created successfully! Redirecting...");
 
       setTimeout(() => {
@@ -342,50 +300,54 @@ function initAuthForms() {
         } else {
           window.location.href = "buyer-dashboard.html";
         }
-      }, 900);
+      }, 800);
     });
   }
 }
 
-function showInputError(fieldId, message) {
-  const input = document.getElementById(fieldId);
-  if (!input) return;
-  input.classList.add("is-invalid");
-  let errorEl = input.nextElementSibling;
-  if (!errorEl || !errorEl.classList.contains("error-message")) {
-    errorEl = document.createElement("div");
-    errorEl.className = "error-message";
-    input.parentNode.appendChild(errorEl);
-  }
-  errorEl.textContent = message;
-  errorEl.style.display = "block";
-}
-
-function clearInputError(fieldId) {
-  const input = document.getElementById(fieldId);
-  if (!input) return;
-  input.classList.remove("is-invalid");
-  const errorEl = input.nextElementSibling;
-  if (errorEl && errorEl.classList.contains("error-message")) {
-    errorEl.style.display = "none";
-  }
-}
-
 // ==============================================================================
-// 4. FARMER DASHBOARD LOGIC (Add, Edit, Delete Produce)
+// 3. FARMER DASHBOARD LOGIC (Live API & Orders Fulfillment)
 // ==============================================================================
 
-function initFarmerDashboard() {
+let currentFarmerProduce = [];
+let currentFarmerOrders = [];
+
+async function initFarmerDashboard() {
   const tableBody = document.getElementById("farmerProduceTableBody");
   const addForm = document.getElementById("addProduceForm");
   if (!tableBody && !addForm) return;
 
-  // Render initial table
-  renderFarmerTable();
+  const currentUser = await window.agriMandiSupabase.getCurrentUser();
+  if (!currentUser) return;
+
+  // Setup tabs
+  const tabListingsBtn = document.getElementById("tabListingsBtn");
+  const tabOrdersBtn = document.getElementById("tabOrdersBtn");
+  const viewListingsTab = document.getElementById("viewListingsTab");
+  const viewOrdersTab = document.getElementById("viewOrdersTab");
+
+  if (tabListingsBtn && tabOrdersBtn) {
+    tabListingsBtn.addEventListener("click", () => {
+      tabListingsBtn.className = "btn btn-primary btn-sm";
+      tabOrdersBtn.className = "btn btn-outline btn-sm";
+      if (viewListingsTab) viewListingsTab.style.display = "block";
+      if (viewOrdersTab) viewOrdersTab.style.display = "none";
+    });
+
+    tabOrdersBtn.addEventListener("click", () => {
+      tabOrdersBtn.className = "btn btn-primary btn-sm";
+      tabListingsBtn.className = "btn btn-outline btn-sm";
+      if (viewListingsTab) viewListingsTab.style.display = "none";
+      if (viewOrdersTab) viewOrdersTab.style.display = "block";
+    });
+  }
+
+  // Load Initial Data
+  await refreshFarmerDashboard(currentUser.id);
 
   // Add Produce Form Submission
   if (addForm) {
-    addForm.addEventListener("submit", (e) => {
+    addForm.addEventListener("submit", async (e) => {
       e.preventDefault();
 
       const name = document.getElementById("cropName").value.trim();
@@ -394,7 +356,9 @@ function initFarmerDashboard() {
       const unit = document.getElementById("cropUnit").value;
       const price = parseFloat(document.getElementById("cropPrice").value);
       const location = document.getElementById("cropLocation").value.trim();
-      const imageInput = document.getElementById("cropImage");
+      const fileInput = document.getElementById("cropImageFile");
+      const urlFallbackInput = document.getElementById("cropImageUrlFallback");
+      const submitBtn = document.getElementById("submitProduceBtn");
 
       let isValid = true;
       if (!name) {
@@ -427,70 +391,162 @@ function initFarmerDashboard() {
 
       if (!isValid) return;
 
-      const user = getCurrentUser() || { name: "Rameshwar Patel" };
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Publishing Listing...";
+      }
 
-      // Helper to finalize item addition
-      const finalizeAdd = (imageUrl) => {
-        /**
-         * BACKEND INTEGRATION HOOK:
-         * Replace with:
-         * await fetch('/api/produce', { method: 'POST', body: JSON.stringify(newItem) });
-         */
-        const items = getProduceList();
-        const newItem = {
-          id: "prod-" + Date.now(),
-          name: name,
-          category: category,
-          quantity: quantity,
-          unit: unit,
-          price: price,
-          location: location,
-          farmerName: user.name,
-          image: imageUrl || CATEGORY_IMAGES[category] || CATEGORY_IMAGES.Vegetables,
-          dateAdded: new Date().toISOString().split("T")[0]
-        };
+      // Handle Image: Upload to Supabase Storage if file selected
+      let finalImageUrl = "";
+      if (fileInput && fileInput.files && fileInput.files[0]) {
+        try {
+          const file = fileInput.files[0];
+          submitBtn.textContent = "Uploading Image to Storage...";
+          finalImageUrl = await window.agriMandiSupabase.uploadProduceImage(file, currentUser.id);
+        } catch (uploadError) {
+          console.warn("Storage upload failed, trying URL fallback:", uploadError);
+          showToast(`Image upload notice: ${uploadError.message}. Using URL fallback.`, "error");
+        }
+      }
 
-        items.unshift(newItem);
-        saveProduceList(items);
+      if (!finalImageUrl && urlFallbackInput && urlFallbackInput.value.trim()) {
+        finalImageUrl = urlFallbackInput.value.trim();
+      }
 
-        renderFarmerTable();
-        addForm.reset();
-        showToast(`"${name}" has been published to the marketplace!`);
+      if (!finalImageUrl) {
+        finalImageUrl = CATEGORY_IMAGES[category] || CATEGORY_IMAGES.Vegetables;
+      }
+
+      submitBtn.textContent = "Saving to AgriMandi API...";
+
+      const payload = {
+        name,
+        category,
+        quantity,
+        unit,
+        price,
+        location,
+        image: finalImageUrl
       };
 
-      // Check if custom image uploaded
-      if (imageInput && imageInput.files && imageInput.files[0]) {
-        const reader = new FileReader();
-        reader.onload = function(evt) {
-          finalizeAdd(evt.target.result);
-        };
-        reader.readAsDataURL(imageInput.files[0]);
-      } else {
-        finalizeAdd(null);
+      const resp = await window.agriMandiApi.produce.create(payload);
+
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = "🌾 Publish Produce Listing";
+      }
+
+      if (resp.success) {
+        showToast(`"${name}" published successfully!`);
+        addForm.reset();
+        await refreshFarmerDashboard(currentUser.id);
       }
     });
   }
 
-  // Bind Edit Modal Submissions
-  initEditModal();
+  // Event Delegation for Farmer Produce Table (Edit & Delete)
+  if (tableBody) {
+    tableBody.addEventListener("click", async (e) => {
+      const editBtn = e.target.closest("[data-action='edit']");
+      const deleteBtn = e.target.closest("[data-action='delete']");
+
+      if (editBtn) {
+        const id = editBtn.getAttribute("data-id");
+        openEditModal(id);
+      } else if (deleteBtn) {
+        const id = deleteBtn.getAttribute("data-id");
+        await handleFarmerDelete(id, currentUser.id);
+      }
+    });
+  }
+
+  // Event Delegation for Farmer Orders Table (Status transitions)
+  const ordersTableBody = document.getElementById("farmerOrdersTableBody");
+  if (ordersTableBody) {
+    ordersTableBody.addEventListener("click", async (e) => {
+      const actionBtn = e.target.closest("[data-order-action]");
+      if (!actionBtn) return;
+
+      const orderId = actionBtn.getAttribute("data-order-id");
+      const nextStatus = actionBtn.getAttribute("data-next-status");
+      if (!orderId || !nextStatus) return;
+
+      if (!confirm(`Update order #${orderId} status to "${nextStatus}"?`)) {
+        return;
+      }
+
+      actionBtn.disabled = true;
+      const resp = await window.agriMandiApi.orders.updateStatus(orderId, nextStatus);
+      if (resp.success) {
+        showToast(`Order #${orderId} updated to ${nextStatus}!`);
+        await refreshFarmerDashboard(currentUser.id);
+      } else {
+        actionBtn.disabled = false;
+      }
+    });
+  }
+
+  initEditModal(currentUser.id);
 }
 
-function renderFarmerTable() {
+/**
+ * Loads and refreshes farmer metrics, listings, and incoming orders from the API
+ */
+async function refreshFarmerDashboard(farmerId) {
+  const tableBody = document.getElementById("farmerProduceTableBody");
+  const ordersTableBody = document.getElementById("farmerOrdersTableBody");
+  if (tableBody) {
+    tableBody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align: center; padding: 30px; color: var(--text-muted);">
+          Loading your active listings...
+        </td>
+      </tr>
+    `;
+  }
+
+  // 1. Fetch Farmer Produce
+  const produceResp = await window.agriMandiApi.produce.list({ farmer_id: farmerId, limit: 50 });
+  currentFarmerProduce = (produceResp.success && produceResp.data) ? produceResp.data : [];
+
+  // 2. Fetch Farmer Orders
+  const ordersResp = await window.agriMandiApi.orders.list();
+  currentFarmerOrders = (ordersResp.success && ordersResp.data) ? ordersResp.data : [];
+
+  // Update Stats Cards
+  const countEl = document.getElementById("statTotalListings");
+  const qtyEl = document.getElementById("statTotalQuantity");
+  const ordersCountEl = document.getElementById("statTotalOrders");
+  const revenueEl = document.getElementById("statTotalRevenue");
+  const ordersBadge = document.getElementById("ordersCountBadge");
+
+  if (countEl) countEl.textContent = currentFarmerProduce.length;
+  if (qtyEl) {
+    const totalVolume = currentFarmerProduce.reduce((sum, p) => sum + Number(p.quantity || 0), 0);
+    qtyEl.textContent = `${totalVolume.toLocaleString()} units`;
+  }
+  if (ordersCountEl) ordersCountEl.textContent = currentFarmerOrders.length;
+  if (ordersBadge) ordersBadge.textContent = currentFarmerOrders.length;
+
+  if (revenueEl) {
+    const deliveredRevenue = currentFarmerOrders
+      .filter(o => o.status === "Delivered")
+      .reduce((sum, o) => sum + Number(o.totalPrice || 0), 0);
+    revenueEl.textContent = formatCurrency(deliveredRevenue);
+  }
+
+  // Render Produce Table
+  renderFarmerProduceTable();
+
+  // Render Orders Table
+  renderFarmerOrdersTable();
+}
+
+function renderFarmerProduceTable() {
   const tableBody = document.getElementById("farmerProduceTableBody");
   if (!tableBody) return;
 
-  const items = getProduceList();
-  
-  // Update Stats Counters
-  const countEl = document.getElementById("statTotalListings");
-  const qtyEl = document.getElementById("statTotalQuantity");
-  if (countEl) countEl.textContent = items.length;
-  if (qtyEl) {
-    const totalQty = items.reduce((sum, it) => sum + Number(it.quantity || 0), 0);
-    qtyEl.textContent = totalQty.toLocaleString();
-  }
-
-  if (items.length === 0) {
+  if (currentFarmerProduce.length === 0) {
     tableBody.innerHTML = `
       <tr>
         <td colspan="6" style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
@@ -501,35 +557,40 @@ function renderFarmerTable() {
     return;
   }
 
-  tableBody.innerHTML = items.map(item => `
-    <tr id="row-${item.id}">
+  tableBody.innerHTML = currentFarmerProduce.map(item => `
+    <tr id="row-${escapeHtml(item.id)}">
       <td>
         <div class="crop-cell">
-          <img src="${item.image}" alt="${item.name}" class="crop-thumb" onerror="this.src='https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=100&q=80'" />
+          <img 
+            src="${sanitizeImageUrl(item.image, item.category)}" 
+            alt="${escapeHtml(item.name)}" 
+            class="crop-thumb" 
+            onerror="this.src='${CATEGORY_IMAGES.Vegetables}'" 
+          />
           <div class="crop-info-text">
-            <strong>${item.name}</strong>
-            <small>${item.category}</small>
+            <strong>${escapeHtml(item.name)}</strong>
+            <small>${escapeHtml(item.category)}</small>
           </div>
         </div>
       </td>
       <td>
-        <span class="badge badge-green">${item.category}</span>
+        <span class="badge badge-green">${escapeHtml(item.category)}</span>
       </td>
       <td>
-        <strong>${item.quantity}</strong> ${item.unit}
+        <strong>${item.quantity}</strong> ${escapeHtml(item.unit)}
       </td>
       <td>
-        <strong style="color: var(--primary);">${formatCurrency(item.price)}</strong> / ${item.unit}
+        <strong style="color: var(--primary);">${formatCurrency(item.price)}</strong> / ${escapeHtml(item.unit)}
       </td>
       <td>
-        <span style="color: var(--text-muted); font-size: 0.9rem;">📍 ${item.location}</span>
+        <span style="color: var(--text-muted); font-size: 0.9rem;">📍 ${escapeHtml(item.location)}</span>
       </td>
-      <td>
-        <div class="action-buttons">
-          <button class="btn btn-sm btn-outline" onclick="openEditModal('${item.id}')" title="Edit Listing">
+      <td style="text-align: right;">
+        <div class="action-buttons" style="justify-content: flex-end;">
+          <button class="btn btn-sm btn-outline" data-action="edit" data-id="${escapeHtml(item.id)}" title="Edit Listing">
             ✏️ Edit
           </button>
-          <button class="btn btn-sm btn-danger" onclick="deleteProduce('${item.id}')" title="Delete Listing">
+          <button class="btn btn-sm btn-danger" data-action="delete" data-id="${escapeHtml(item.id)}" title="Delete Listing">
             🗑️ Delete
           </button>
         </div>
@@ -538,29 +599,100 @@ function renderFarmerTable() {
   `).join("");
 }
 
-/**
- * Delete Produce Item
- * BACKEND INTEGRATION HOOK:
- * Replace with:
- * await fetch(`/api/produce/${id}`, { method: 'DELETE' });
- */
-function deleteProduce(id) {
-  const items = getProduceList();
-  const target = items.find(i => i.id === id);
-  const cropName = target ? target.name : "Item";
+function renderFarmerOrdersTable() {
+  const ordersTableBody = document.getElementById("farmerOrdersTableBody");
+  if (!ordersTableBody) return;
 
-  if (!confirm(`Are you sure you want to remove "${cropName}" from your listings?`)) {
+  if (currentFarmerOrders.length === 0) {
+    ordersTableBody.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align: center; padding: 40px 20px; color: var(--text-muted);">
+          No customer orders received yet. Active marketplace listings will appear here when purchased.
+        </td>
+      </tr>
+    `;
     return;
   }
 
-  const updated = items.filter(i => i.id !== id);
-  saveProduceList(updated);
-  renderFarmerTable();
-  showToast(`"${cropName}" removed from marketplace.`);
+  ordersTableBody.innerHTML = currentFarmerOrders.map(order => {
+    let statusBadgeClass = "badge-earth";
+    if (order.status === "Delivered") statusBadgeClass = "badge-green";
+    else if (order.status === "Cancelled") statusBadgeClass = "badge-danger";
+
+    let actionsHtml = "";
+    if (order.status === "Pending") {
+      actionsHtml = `
+        <button class="btn btn-sm btn-primary" data-order-action="true" data-order-id="${escapeHtml(order.orderId)}" data-next-status="Confirmed">
+          Confirm
+        </button>
+        <button class="btn btn-sm btn-danger" data-order-action="true" data-order-id="${escapeHtml(order.orderId)}" data-next-status="Cancelled" style="margin-left: 4px;">
+          Cancel
+        </button>
+      `;
+    } else if (order.status === "Confirmed") {
+      actionsHtml = `
+        <button class="btn btn-sm btn-primary" data-order-action="true" data-order-id="${escapeHtml(order.orderId)}" data-next-status="Dispatched">
+          Dispatch 🚚
+        </button>
+        <button class="btn btn-sm btn-danger" data-order-action="true" data-order-id="${escapeHtml(order.orderId)}" data-next-status="Cancelled" style="margin-left: 4px;">
+          Cancel
+        </button>
+      `;
+    } else if (order.status === "Dispatched") {
+      actionsHtml = `
+        <button class="btn btn-sm btn-primary" data-order-action="true" data-order-id="${escapeHtml(order.orderId)}" data-next-status="Delivered">
+          Mark Delivered ✅
+        </button>
+      `;
+    } else {
+      actionsHtml = `<span style="color: var(--text-muted); font-size: 0.85rem;">Completed</span>`;
+    }
+
+    return `
+      <tr>
+        <td>
+          <strong>#${escapeHtml(order.orderId)}</strong><br/>
+          <small style="color: var(--text-muted);">${escapeHtml(order.orderDate)}</small>
+        </td>
+        <td>
+          <strong>${escapeHtml(order.produceName)}</strong>
+        </td>
+        <td>
+          ${order.quantity} ${escapeHtml(order.unit)}
+        </td>
+        <td>
+          <strong style="color: var(--primary);">${formatCurrency(order.totalPrice)}</strong>
+        </td>
+        <td>
+          <strong>${escapeHtml(order.buyerName)}</strong><br/>
+          <small style="color: var(--text-muted);">${escapeHtml(order.deliveryAddress)}</small>
+        </td>
+        <td>
+          <span class="badge ${statusBadgeClass}">${escapeHtml(order.status)}</span>
+        </td>
+        <td style="text-align: right;">
+          ${actionsHtml}
+        </td>
+      </tr>
+    `;
+  }).join("");
 }
 
-// Edit Modal Functions
-function initEditModal() {
+async function handleFarmerDelete(produceId, farmerId) {
+  const item = currentFarmerProduce.find(p => p.id === produceId);
+  const name = item ? item.name : "this item";
+  if (!confirm(`Are you sure you want to remove "${name}" from your listings?`)) {
+    return;
+  }
+
+  const resp = await window.agriMandiApi.produce.delete(produceId);
+  if (resp.success) {
+    showToast(`"${name}" removed successfully.`);
+    await refreshFarmerDashboard(farmerId);
+  }
+}
+
+function initEditModal(farmerId) {
   const modal = document.getElementById("editModal");
   const editForm = document.getElementById("editProduceForm");
   const closeBtn = document.getElementById("closeEditModal");
@@ -572,35 +704,41 @@ function initEditModal() {
   if (closeBtn) closeBtn.addEventListener("click", closeModal);
   if (cancelBtn) cancelBtn.addEventListener("click", closeModal);
 
-  // Close when clicking outside content
   modal.addEventListener("click", (e) => {
     if (e.target === modal) closeModal();
   });
 
-  editForm.addEventListener("submit", (e) => {
+  editForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const id = document.getElementById("editProduceId").value;
-    const items = getProduceList();
-    const index = items.findIndex(i => i.id === id);
+    const saveBtn = document.getElementById("saveEditBtn");
 
-    if (index === -1) return;
+    const updates = {
+      name: document.getElementById("editCropName").value.trim(),
+      category: document.getElementById("editCropCategory").value,
+      quantity: parseFloat(document.getElementById("editCropQuantity").value),
+      unit: document.getElementById("editCropUnit").value,
+      price: parseFloat(document.getElementById("editCropPrice").value),
+      location: document.getElementById("editCropLocation").value.trim()
+    };
 
-    items[index].name = document.getElementById("editCropName").value.trim();
-    items[index].category = document.getElementById("editCropCategory").value;
-    items[index].quantity = parseFloat(document.getElementById("editCropQuantity").value);
-    items[index].unit = document.getElementById("editCropUnit").value;
-    items[index].price = parseFloat(document.getElementById("editCropPrice").value);
-    items[index].location = document.getElementById("editCropLocation").value.trim();
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Saving...";
+    }
 
-    /**
-     * BACKEND INTEGRATION HOOK:
-     * Replace with:
-     * await fetch(`/api/produce/${id}`, { method: 'PUT', body: JSON.stringify(items[index]) });
-     */
-    saveProduceList(items);
-    renderFarmerTable();
-    closeModal();
-    showToast(`Updated "${items[index].name}" successfully!`);
+    const resp = await window.agriMandiApi.produce.update(id, updates);
+
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "Save Changes";
+    }
+
+    if (resp.success) {
+      closeModal();
+      showToast(`Updated "${updates.name}" successfully!`);
+      await refreshFarmerDashboard(farmerId);
+    }
   });
 }
 
@@ -608,8 +746,7 @@ function openEditModal(id) {
   const modal = document.getElementById("editModal");
   if (!modal) return;
 
-  const items = getProduceList();
-  const item = items.find(i => i.id === id);
+  const item = currentFarmerProduce.find(i => i.id === id);
   if (!item) return;
 
   document.getElementById("editProduceId").value = item.id;
@@ -624,81 +761,138 @@ function openEditModal(id) {
 }
 
 // ==============================================================================
-// 5. BUYER DASHBOARD LOGIC (Marketplace Grid, Search & Filters)
+// 4. BUYER DASHBOARD LOGIC (Marketplace, Filters, Purchase Modal)
 // ==============================================================================
 
-function initBuyerDashboard() {
+let buyerProduceList = [];
+let buyerPagination = { page: 1, limit: 12, total: 0 };
+let activePurchaseProduce = null;
+
+async function initBuyerDashboard() {
   const grid = document.getElementById("produceGrid");
   if (!grid) return;
 
   const searchInput = document.getElementById("searchInput");
   const categoryFilter = document.getElementById("categoryFilter");
   const locationFilter = document.getElementById("locationFilter");
+  const minPriceFilter = document.getElementById("minPriceFilter");
+  const maxPriceFilter = document.getElementById("maxPriceFilter");
   const resetBtn = document.getElementById("resetFiltersBtn");
 
-  // Populate dynamic location filter options from current inventory
-  populateLocationOptions();
+  // Load marketplace listings from API
+  await loadMarketplaceListings(1);
 
-  // Initial render of all produce
-  renderBuyerCards(getProduceList());
-
-  // Search & Filter event listeners
-  const handleFilter = () => {
-    const items = getProduceList();
-    const query = searchInput ? searchInput.value.toLowerCase().trim() : "";
-    const selectedCategory = categoryFilter ? categoryFilter.value : "";
-    const selectedLocation = locationFilter ? locationFilter.value : "";
-
-    const filtered = items.filter(item => {
-      const matchesSearch = query === "" || 
-        item.name.toLowerCase().includes(query) || 
-        item.location.toLowerCase().includes(query) ||
-        item.farmerName.toLowerCase().includes(query);
-
-      const matchesCategory = selectedCategory === "" || item.category === selectedCategory;
-      const matchesLocation = selectedLocation === "" || item.location.toLowerCase().includes(selectedLocation.toLowerCase());
-
-      return matchesSearch && matchesCategory && matchesLocation;
-    });
-
-    renderBuyerCards(filtered);
+  // Debounce search and filter updates
+  let filterTimer = null;
+  const triggerFilter = () => {
+    clearTimeout(filterTimer);
+    filterTimer = setTimeout(() => {
+      loadMarketplaceListings(1);
+    }, 300);
   };
 
-  if (searchInput) searchInput.addEventListener("input", handleFilter);
-  if (categoryFilter) categoryFilter.addEventListener("change", handleFilter);
-  if (locationFilter) locationFilter.addEventListener("change", handleFilter);
+  if (searchInput) searchInput.addEventListener("input", triggerFilter);
+  if (categoryFilter) categoryFilter.addEventListener("change", triggerFilter);
+  if (locationFilter) locationFilter.addEventListener("change", triggerFilter);
+  if (minPriceFilter) minPriceFilter.addEventListener("input", triggerFilter);
+  if (maxPriceFilter) maxPriceFilter.addEventListener("input", triggerFilter);
 
   if (resetBtn) {
     resetBtn.addEventListener("click", () => {
       if (searchInput) searchInput.value = "";
       if (categoryFilter) categoryFilter.value = "";
       if (locationFilter) locationFilter.value = "";
-      renderBuyerCards(getProduceList());
+      if (minPriceFilter) minPriceFilter.value = "";
+      if (maxPriceFilter) maxPriceFilter.value = "";
+      loadMarketplaceListings(1);
     });
   }
-}
 
-function populateLocationOptions() {
-  const locationSelect = document.getElementById("locationFilter");
-  if (!locationSelect) return;
-
-  const items = getProduceList();
-  const states = new Set();
-
-  items.forEach(item => {
-    if (item.location) {
-      // Extract state or city
-      const parts = item.location.split(",");
-      const region = parts[parts.length - 1].trim();
-      if (region) states.add(region);
+  // Event Delegation for "Buy Now" on cards
+  grid.addEventListener("click", (e) => {
+    const buyBtn = e.target.closest("[data-buy-id]");
+    if (buyBtn) {
+      const id = buyBtn.getAttribute("data-buy-id");
+      openPurchaseModal(id);
     }
   });
 
-  states.forEach(region => {
-    const option = document.createElement("option");
-    option.value = region;
-    option.textContent = region;
-    locationSelect.appendChild(option);
+  // Purchase Modal Form bindings
+  initPurchaseModal();
+}
+
+async function loadMarketplaceListings(page = 1) {
+  const grid = document.getElementById("produceGrid");
+  const resultsCount = document.getElementById("resultsCount");
+  if (!grid) return;
+
+  grid.innerHTML = `
+    <div style="grid-column: 1 / -1; text-align: center; padding: 48px 0; color: var(--text-muted);">
+      <div style="font-size: 2rem; margin-bottom: 8px;">🌾</div>
+      Loading fresh harvests directly from growers...
+    </div>
+  `;
+
+  const searchInput = document.getElementById("searchInput");
+  const categoryFilter = document.getElementById("categoryFilter");
+  const locationFilter = document.getElementById("locationFilter");
+  const minPriceFilter = document.getElementById("minPriceFilter");
+  const maxPriceFilter = document.getElementById("maxPriceFilter");
+
+  const queryParams = {
+    page: page,
+    limit: buyerPagination.limit,
+    search: searchInput ? searchInput.value.trim() : "",
+    category: categoryFilter ? categoryFilter.value : "",
+    location: locationFilter ? locationFilter.value.trim() : "",
+    min_price: minPriceFilter && minPriceFilter.value ? minPriceFilter.value : "",
+    max_price: maxPriceFilter && maxPriceFilter.value ? maxPriceFilter.value : ""
+  };
+
+  const resp = await window.agriMandiApi.produce.list(queryParams);
+
+  if (!resp.success) {
+    grid.innerHTML = `
+      <div class="empty-state" style="grid-column: 1 / -1;">
+        <div class="empty-icon">⚠️</div>
+        <h3>Failed to load listings</h3>
+        <p>${escapeHtml(resp.error)}</p>
+      </div>
+    `;
+    return;
+  }
+
+  buyerProduceList = resp.data || [];
+  buyerPagination.page = resp.page || page;
+  buyerPagination.total = resp.total || buyerProduceList.length;
+
+  if (resultsCount) {
+    resultsCount.textContent = `Showing ${buyerProduceList.length} of ${buyerPagination.total} listing${buyerPagination.total === 1 ? '' : 's'}`;
+  }
+
+  populateLocationOptions(buyerProduceList);
+  renderBuyerCards(buyerProduceList);
+  renderPaginationControls();
+}
+
+function populateLocationOptions(items) {
+  const locationSelect = document.getElementById("locationFilter");
+  if (!locationSelect || locationSelect.options.length > 1) return;
+
+  const locations = new Set();
+  items.forEach(item => {
+    if (item.location) {
+      const parts = item.location.split(",");
+      const region = parts[parts.length - 1].trim();
+      if (region) locations.add(region);
+    }
+  });
+
+  locations.forEach(region => {
+    const opt = document.createElement("option");
+    opt.value = region;
+    opt.textContent = region;
+    locationSelect.appendChild(opt);
   });
 }
 
@@ -706,17 +900,12 @@ function renderBuyerCards(items) {
   const grid = document.getElementById("produceGrid");
   if (!grid) return;
 
-  const resultsCount = document.getElementById("resultsCount");
-  if (resultsCount) {
-    resultsCount.textContent = `Showing ${items.length} listing${items.length === 1 ? '' : 's'}`;
-  }
-
   if (items.length === 0) {
     grid.innerHTML = `
-      <div class="empty-state">
+      <div class="empty-state" style="grid-column: 1 / -1;">
         <div class="empty-icon">🌾</div>
         <h3>No produce matches your search</h3>
-        <p>Try searching for a different crop name, change the category filter, or reset filters.</p>
+        <p>Try searching for a different crop name, change the category filter, or reset your filters.</p>
       </div>
     `;
     return;
@@ -726,31 +915,31 @@ function renderBuyerCards(items) {
     <div class="produce-card">
       <div class="produce-card-img-wrapper">
         <img 
-          src="${item.image}" 
-          alt="${item.name}" 
+          src="${sanitizeImageUrl(item.image, item.category)}" 
+          alt="${escapeHtml(item.name)}" 
           class="produce-card-img" 
-          onerror="this.src='https://images.unsplash.com/photo-1540420773420-3366772f4999?auto=format&fit=crop&w=600&q=80'"
+          onerror="this.src='${CATEGORY_IMAGES.Vegetables}'" 
         />
-        <span class="badge badge-green card-category-badge">${item.category}</span>
+        <span class="badge badge-green card-category-badge">${escapeHtml(item.category)}</span>
       </div>
       <div class="produce-card-body">
-        <h3 class="produce-card-title">${item.name}</h3>
+        <h3 class="produce-card-title">${escapeHtml(item.name)}</h3>
         <div class="produce-meta-row">
-          <span>👨‍🌾 ${item.farmerName || 'Local Farmer'}</span>
+          <span>👨‍🌾 ${escapeHtml(item.farmerName || 'Verified Farmer')}</span>
           <span>•</span>
-          <span>📍 ${item.location}</span>
+          <span>📍 ${escapeHtml(item.location)}</span>
         </div>
         <div class="produce-details-box">
           <div>
-            <div class="price-tag">${formatCurrency(item.price)} <small>/ ${item.unit}</small></div>
+            <div class="price-tag">${formatCurrency(item.price)} <small>/ ${escapeHtml(item.unit)}</small></div>
           </div>
           <div class="stock-tag">
-            Available: <strong>${item.quantity} ${item.unit}</strong>
+            Available: <strong>${item.quantity} ${escapeHtml(item.unit)}</strong>
           </div>
         </div>
         <div class="produce-card-actions">
-          <button class="btn btn-primary btn-block" onclick="handleBuyNow('${item.id}')">
-            🛒 Buy Now
+          <button class="btn btn-primary btn-block" data-buy-id="${escapeHtml(item.id)}" ${item.quantity <= 0 ? 'disabled' : ''}>
+            ${item.quantity <= 0 ? 'Out of Stock' : '🛒 Buy Now'}
           </button>
         </div>
       </div>
@@ -758,122 +947,245 @@ function renderBuyerCards(items) {
   `).join("");
 }
 
-/**
- * Handles "Buy Now" click on buyer dashboard
- * Prepares the mock order and redirects to order-success.html
- */
-function handleBuyNow(id) {
-  const items = getProduceList();
-  const item = items.find(i => i.id === id);
+function renderPaginationControls() {
+  const container = document.getElementById("paginationControls");
+  if (!container) return;
+
+  const totalPages = Math.ceil(buyerPagination.total / buyerPagination.limit) || 1;
+  if (totalPages <= 1) {
+    container.innerHTML = "";
+    return;
+  }
+
+  container.innerHTML = `
+    <button class="btn btn-outline btn-sm" id="prevPageBtn" ${buyerPagination.page <= 1 ? "disabled" : ""}>
+      ← Previous
+    </button>
+    <span style="font-weight: 600; color: var(--text-muted); font-size: 0.9rem;">
+      Page ${buyerPagination.page} of ${totalPages}
+    </span>
+    <button class="btn btn-outline btn-sm" id="nextPageBtn" ${buyerPagination.page >= totalPages ? "disabled" : ""}>
+      Next →
+    </button>
+  `;
+
+  const prevBtn = document.getElementById("prevPageBtn");
+  const nextBtn = document.getElementById("nextPageBtn");
+
+  if (prevBtn) {
+    prevBtn.addEventListener("click", () => loadMarketplaceListings(buyerPagination.page - 1));
+  }
+  if (nextBtn) {
+    nextBtn.addEventListener("click", () => loadMarketplaceListings(buyerPagination.page + 1));
+  }
+}
+
+// Purchase Order Modal Implementation
+function initPurchaseModal() {
+  const modal = document.getElementById("purchaseModal");
+  const form = document.getElementById("purchaseOrderForm");
+  const closeBtn = document.getElementById("closePurchaseModal");
+  const cancelBtn = document.getElementById("cancelPurchaseModal");
+  const qtyInput = document.getElementById("orderQuantity");
+
+  if (!modal || !form) return;
+
+  const closeModal = () => modal.classList.remove("active");
+  if (closeBtn) closeBtn.addEventListener("click", closeModal);
+  if (cancelBtn) cancelBtn.addEventListener("click", closeModal);
+
+  modal.addEventListener("click", (e) => {
+    if (e.target === modal) closeModal();
+  });
+
+  // Dynamic order total update on quantity input
+  if (qtyInput) {
+    qtyInput.addEventListener("input", () => {
+      updateModalComputedTotal();
+    });
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!activePurchaseProduce) return;
+
+    const qty = parseFloat(document.getElementById("orderQuantity").value);
+    const address = document.getElementById("orderDeliveryAddress").value.trim();
+    const submitBtn = document.getElementById("confirmOrderSubmitBtn");
+    const qtyErr = document.getElementById("quantityError");
+    const addrErr = document.getElementById("addressError");
+
+    let isValid = true;
+
+    if (!qty || qty <= 0) {
+      if (qtyErr) {
+        qtyErr.textContent = "Quantity must be greater than zero.";
+        qtyErr.style.display = "block";
+      }
+      isValid = false;
+    } else if (qty > activePurchaseProduce.quantity) {
+      if (qtyErr) {
+        qtyErr.textContent = `Requested quantity exceeds available stock (${activePurchaseProduce.quantity} ${activePurchaseProduce.unit}).`;
+        qtyErr.style.display = "block";
+      }
+      isValid = false;
+    } else {
+      if (qtyErr) qtyErr.style.display = "none";
+    }
+
+    if (!address || address.length < 5) {
+      if (addrErr) {
+        addrErr.textContent = "Please provide complete delivery street address and city.";
+        addrErr.style.display = "block";
+      }
+      isValid = false;
+    } else {
+      if (addrErr) addrErr.style.display = "none";
+    }
+
+    if (!isValid) return;
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = "Placing Order with Server...";
+    }
+
+    const payload = {
+      produceId: activePurchaseProduce.id,
+      quantity: qty,
+      deliveryAddress: address
+    };
+
+    const resp = await window.agriMandiApi.orders.create(payload);
+
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.textContent = "✓ Confirm Purchase";
+    }
+
+    if (resp.success && resp.data) {
+      closeModal();
+      showToast("Order placed successfully! Redirecting...");
+      const orderId = resp.data.orderId || resp.data.id;
+      setTimeout(() => {
+        window.location.href = `order-success.html?orderId=${encodeURIComponent(orderId)}`;
+      }, 700);
+    }
+  });
+}
+
+function openPurchaseModal(produceId) {
+  const modal = document.getElementById("purchaseModal");
+  if (!modal) return;
+
+  const item = buyerProduceList.find(p => p.id === produceId);
   if (!item) return;
 
-  const currentUser = getCurrentUser() || { name: "Ananya Sharma", email: "ananya@example.com" };
+  activePurchaseProduce = item;
 
-  // Calculate mock purchase quantity (default: 1 unit or min available)
-  const orderQuantity = 1;
-  const totalAmount = item.price * orderQuantity;
+  document.getElementById("orderProduceId").value = item.id;
+  document.getElementById("orderCropName").textContent = item.name;
+  document.getElementById("orderFarmerName").textContent = item.farmerName || "Verified Grower";
+  document.getElementById("orderAvailableStock").textContent = `${item.quantity} ${item.unit}`;
+  document.getElementById("orderRateDisplay").textContent = `${formatCurrency(item.price)} / ${item.unit}`;
+  document.getElementById("orderUnitLabel").textContent = item.unit;
 
-  const orderData = {
-    orderId: "AGRI-" + Math.floor(100000 + Math.random() * 900000),
-    orderDate: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
-    produceName: item.name,
-    category: item.category,
-    quantity: orderQuantity,
-    unit: item.unit,
-    unitPrice: item.price,
-    totalPrice: totalAmount,
-    farmerName: item.farmerName || "Verified Grower",
-    farmerLocation: item.location,
-    buyerName: currentUser.name,
-    buyerEmail: currentUser.email,
-    deliveryAddress: currentUser.location || "102 Green Acres, Pune, Maharashtra",
-    estimatedDelivery: "3-5 Business Days"
-  };
+  const qtyInput = document.getElementById("orderQuantity");
+  qtyInput.value = "1";
+  qtyInput.max = item.quantity;
 
-  /**
-   * BACKEND INTEGRATION HOOK:
-   * Replace with:
-   * const response = await fetch('/api/orders', { method: 'POST', body: JSON.stringify(orderData) });
-   */
-  localStorage.setItem("agrimandi_latest_order", JSON.stringify(orderData));
+  updateModalComputedTotal();
+  modal.classList.add("active");
+}
 
-  // Redirect to order success page
-  window.location.href = "order-success.html";
+function updateModalComputedTotal() {
+  if (!activePurchaseProduce) return;
+  const qty = parseFloat(document.getElementById("orderQuantity").value) || 0;
+  const total = qty * Number(activePurchaseProduce.price);
+  const totalDisplay = document.getElementById("orderEstimatedTotal");
+  if (totalDisplay) {
+    totalDisplay.textContent = formatCurrency(total);
+  }
 }
 
 // ==============================================================================
-// 6. ORDER SUCCESS LOGIC (order-success.html)
+// 5. ORDER SUCCESS LOGIC (order-success.html)
 // ==============================================================================
 
-function initOrderSuccess() {
+async function initOrderSuccess() {
   const orderBox = document.getElementById("orderSummaryDetails");
   if (!orderBox) return;
 
-  // Retrieve stored order
-  let order = null;
-  try {
-    const raw = localStorage.getItem("agrimandi_latest_order");
-    if (raw) order = JSON.parse(raw);
-  } catch (e) {
-    console.error("Failed to parse latest order", e);
+  const urlParams = new URLSearchParams(window.location.search);
+  const orderId = urlParams.get("orderId");
+
+  if (!orderId) {
+    orderBox.innerHTML = `
+      <div style="text-align: center; padding: 24px; color: var(--text-muted);">
+        <p>No order ID specified.</p>
+        <a href="buyer-dashboard.html" class="btn btn-primary btn-sm">Return to Marketplace</a>
+      </div>
+    `;
+    return;
   }
 
-  // Fallback if accessed directly
-  if (!order) {
-    order = {
-      orderId: "AGRI-582910",
-      orderDate: new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }),
-      produceName: "Sharbati Wheat",
-      category: "Grains",
-      quantity: 1,
-      unit: "Quintal",
-      unitPrice: 3200,
-      totalPrice: 3200,
-      farmerName: "Rameshwar Patel",
-      farmerLocation: "Sehore, Madhya Pradesh",
-      buyerName: "Rahul Verma",
-      deliveryAddress: "Flat 401, Sun City, Pune, MH",
-      estimatedDelivery: "3-4 Days"
-    };
+  orderBox.innerHTML = `
+    <div style="text-align: center; padding: 24px; color: var(--text-muted);">
+      Loading verified order details from server...
+    </div>
+  `;
+
+  const resp = await window.agriMandiApi.orders.get(orderId);
+
+  if (!resp.success || !resp.data) {
+    orderBox.innerHTML = `
+      <div style="text-align: center; padding: 24px; color: var(--text-muted);">
+        <p>Could not retrieve order details: ${escapeHtml(resp.error)}</p>
+        <a href="buyer-dashboard.html" class="btn btn-outline btn-sm">Browse Marketplace</a>
+      </div>
+    `;
+    return;
   }
+
+  const order = resp.data;
 
   orderBox.innerHTML = `
     <div class="order-summary-header">
       <div>
-        <div class="order-id">Order ID: #${order.orderId}</div>
-        <small style="color: var(--text-muted);">Date: ${order.orderDate}</small>
+        <div class="order-id">Order ID: #${escapeHtml(order.orderId)}</div>
+        <small style="color: var(--text-muted);">Date: ${escapeHtml(order.orderDate)}</small>
       </div>
-      <span class="badge badge-green">Confirmed</span>
+      <span class="badge badge-green">${escapeHtml(order.status || 'Confirmed')}</span>
     </div>
 
     <div class="summary-row">
       <span>Item:</span>
-      <strong style="color: var(--text-main);">${order.produceName}</strong>
+      <strong style="color: var(--text-main);">${escapeHtml(order.produceName)}</strong>
     </div>
 
     <div class="summary-row">
       <span>Quantity:</span>
-      <span>${order.quantity} ${order.unit}</span>
+      <span>${order.quantity} ${escapeHtml(order.unit)}</span>
     </div>
 
     <div class="summary-row">
       <span>Rate:</span>
-      <span>${formatCurrency(order.unitPrice)} / ${order.unit}</span>
+      <span>${formatCurrency(order.unitPrice)} / ${escapeHtml(order.unit)}</span>
     </div>
 
     <div class="summary-row">
       <span>Farmer / Source:</span>
-      <span>${order.farmerName} (📍 ${order.farmerLocation})</span>
+      <span>${escapeHtml(order.farmerName)} (📍 ${escapeHtml(order.farmerLocation || 'India')})</span>
     </div>
 
     <div class="summary-row">
       <span>Delivery To:</span>
-      <span>${order.deliveryAddress}</span>
+      <span>${escapeHtml(order.deliveryAddress)}</span>
     </div>
 
     <div class="summary-row">
       <span>Est. Delivery:</span>
-      <span>${order.estimatedDelivery}</span>
+      <span>${escapeHtml(order.estimatedDelivery || '3-5 Business Days')}</span>
     </div>
 
     <div class="summary-row total-row">
@@ -884,10 +1196,10 @@ function initOrderSuccess() {
 }
 
 // ==============================================================================
-// 7. GLOBAL HEADER / ACTIVE NAVIGATION STATE
+// 6. GLOBAL NAVIGATION & IDENTITY STATE
 // ==============================================================================
 
-function updateNavigationState() {
+async function updateNavigationState() {
   const path = window.location.pathname;
   const links = document.querySelectorAll(".nav-link");
   links.forEach(link => {
@@ -897,25 +1209,22 @@ function updateNavigationState() {
     }
   });
 
-  // Display user name if logged in
-  const user = getCurrentUser();
+  if (!window.agriMandiSupabase) return;
+
+  const user = await window.agriMandiSupabase.getCurrentUser();
   const userBadge = document.getElementById("navUserBadge");
   const loginBtn = document.getElementById("navLoginBtn");
   const registerBtn = document.getElementById("navRegisterBtn");
 
   if (userBadge && user) {
-    const roleLabel = user.role === "farmer" ? "\uD83D\uDE9C FARMER" : "\uD83D\uDED2 BUYER";
-    userBadge.textContent = roleLabel + " | " + user.name + " \u2022 Sign Out";
+    const roleLabel = user.role === "farmer" ? "🚜 FARMER" : "🛒 BUYER";
+    userBadge.textContent = `${roleLabel} | ${user.name} • Sign Out`;
     userBadge.style.display = "inline-flex";
     userBadge.style.cursor = "pointer";
     userBadge.title = "Click to sign out";
     userBadge.onclick = async () => {
-      if (confirm("Do you want to sign out from " + user.name + "?")) {
-        if (window.agriMandiSupabase) {
-          await window.agriMandiSupabase.signOut();
-        } else {
-          localStorage.removeItem("agrimandi_user");
-        }
+      if (confirm(`Do you want to sign out from ${user.name}?`)) {
+        await window.agriMandiSupabase.signOut();
         showToast("Signed out successfully.");
         setTimeout(() => {
           window.location.href = "login.html";
@@ -932,8 +1241,9 @@ function updateNavigationState() {
 }
 
 // Global Initialization on DOMContentLoaded
-document.addEventListener("DOMContentLoaded", () => {
-  updateNavigationState();
+document.addEventListener("DOMContentLoaded", async () => {
+  await enforceRoleGuards();
+  await updateNavigationState();
   initAuthForms();
   initFarmerDashboard();
   initBuyerDashboard();

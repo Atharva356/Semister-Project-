@@ -28,4 +28,8 @@ __pycache__/
 *$py.class
 .env
 backend/.env
+config.js
+.agents/
+backend/.agents/
+backend/skills-lock.json
 

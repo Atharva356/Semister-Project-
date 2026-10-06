@@ -48,20 +48,24 @@
       </div>
 
       <!-- Search & Filter Controls -->
-      <section class="filter-bar">
+      <section class="filter-bar" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; align-items: end;">
         <!-- Search Input -->
-        <div class="search-input-wrapper">
-          <span class="search-icon">🔍</span>
-          <input 
-            type="text" 
-            id="searchInput" 
-            class="form-control search-input" 
-            placeholder="Search crop name, location, or farmer..." 
-          />
+        <div class="search-input-wrapper" style="grid-column: span 2;">
+          <label for="searchInput" class="form-label" style="font-size: 0.8rem; margin-bottom: 2px;">Search Crops / Region</label>
+          <div style="position: relative;">
+            <span class="search-icon">🔍</span>
+            <input 
+              type="text" 
+              id="searchInput" 
+              class="form-control search-input" 
+              placeholder="Search crop name, location, or farmer..." 
+            />
+          </div>
         </div>
 
         <!-- Category Dropdown Filter -->
         <div>
+          <label for="categoryFilter" class="form-label" style="font-size: 0.8rem; margin-bottom: 2px;">Category</label>
           <select id="categoryFilter" class="form-select">
             <option value="">All Categories</option>
             <option value="Vegetables">Vegetables</option>
@@ -74,9 +78,34 @@
 
         <!-- Location Dropdown Filter -->
         <div>
+          <label for="locationFilter" class="form-label" style="font-size: 0.8rem; margin-bottom: 2px;">Location</label>
           <select id="locationFilter" class="form-select">
             <option value="">All Locations</option>
           </select>
+        </div>
+
+        <!-- Min Price Filter -->
+        <div>
+          <label for="minPriceFilter" class="form-label" style="font-size: 0.8rem; margin-bottom: 2px;">Min Price (₹)</label>
+          <input 
+            type="number" 
+            id="minPriceFilter" 
+            class="form-control" 
+            placeholder="Min ₹" 
+            min="0"
+          />
+        </div>
+
+        <!-- Max Price Filter -->
+        <div>
+          <label for="maxPriceFilter" class="form-label" style="font-size: 0.8rem; margin-bottom: 2px;">Max Price (₹)</label>
+          <input 
+            type="number" 
+            id="maxPriceFilter" 
+            class="form-control" 
+            placeholder="Max ₹" 
+            min="0"
+          />
         </div>
 
         <!-- Reset Button -->
@@ -92,10 +121,82 @@
         <div class="produce-grid" id="produceGrid">
           <!-- Populated dynamically by app.js -->
         </div>
+
+        <!-- Pagination / Load More Controls -->
+        <div id="paginationControls" style="text-align: center; margin-top: 32px; display: flex; justify-content: center; gap: 12px; align-items: center;">
+          <!-- Rendered dynamically by app.js -->
+        </div>
       </section>
 
     </div>
   </main>
+
+  <!-- Purchase Order Modal Dialog -->
+  <div class="modal-overlay" id="purchaseModal">
+    <div class="modal-content" style="max-width: 520px;">
+      <div class="modal-header">
+        <h3 id="purchaseModalTitle">🛒 Place Direct Farm Order</h3>
+        <button type="button" class="modal-close-btn" id="closePurchaseModal" aria-label="Close dialog">&times;</button>
+      </div>
+      <form id="purchaseOrderForm" novalidate>
+        <div class="modal-body">
+          <input type="hidden" id="orderProduceId" />
+          
+          <div style="background: var(--surface-alt); padding: 14px; border-radius: var(--radius-md); margin-bottom: 16px;">
+            <h4 id="orderCropName" style="margin: 0 0 6px; font-size: 1.1rem; color: var(--text-main);">Crop Name</h4>
+            <div style="display: flex; justify-content: space-between; font-size: 0.9rem; color: var(--text-muted);">
+              <span>Farmer: <strong id="orderFarmerName">Grower</strong></span>
+              <span>Available: <strong id="orderAvailableStock" style="color: var(--primary);">0 Kg</strong></span>
+            </div>
+            <div style="margin-top: 6px; font-size: 0.9rem; color: var(--text-muted);">
+              Rate: <strong id="orderRateDisplay" style="color: var(--primary);">₹0 / unit</strong>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="orderQuantity" class="form-label">Purchase Quantity *</label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input 
+                type="number" 
+                id="orderQuantity" 
+                class="form-control" 
+                min="0.1" 
+                step="any"
+                value="1" 
+                required 
+              />
+              <span id="orderUnitLabel" class="badge badge-earth" style="font-size: 0.95rem; padding: 10px 14px;">Kg</span>
+            </div>
+            <small id="quantityError" class="error-message" style="display: none;"></small>
+          </div>
+
+          <div class="form-group">
+            <label for="orderDeliveryAddress" class="form-label">Delivery Address *</label>
+            <textarea 
+              id="orderDeliveryAddress" 
+              class="form-control" 
+              rows="2" 
+              placeholder="Enter complete delivery street address, city, state"
+              required
+            ></textarea>
+            <small id="addressError" class="error-message" style="display: none;"></small>
+          </div>
+
+          <div style="border-top: 1px dashed var(--border-color); padding-top: 12px; margin-top: 14px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 1rem; color: var(--text-muted);">Total Order Amount:</span>
+            <strong id="orderEstimatedTotal" style="font-size: 1.3rem; color: var(--primary);">₹0</strong>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline btn-sm" id="cancelPurchaseModal">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm" id="confirmOrderSubmitBtn">
+            ✓ Confirm Purchase
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <!-- Site Footer -->
   <footer class="site-footer">
@@ -120,8 +221,10 @@
     </div>
   </footer>
 
+  <script src="config.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabaseClient.js"></script>
+  <script src="api.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

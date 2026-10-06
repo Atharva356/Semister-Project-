@@ -278,6 +278,12 @@ button, input, select, textarea {
   color: #495057;
 }
 
+.badge-danger {
+  background-color: var(--danger-light);
+  color: var(--danger);
+  border: 1px solid #ffd1d1;
+}
+
 /* --- Hero Section (Landing Page) --- */
 .hero-section {
   padding: 80px 0 60px;
