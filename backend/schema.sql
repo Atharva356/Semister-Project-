@@ -49,6 +49,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, auth, pg_temp;
 
+REVOKE EXECUTE ON FUNCTION public.handle_new_user() FROM PUBLIC, anon, authenticated;
+
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
     AFTER INSERT ON auth.users
@@ -65,6 +67,8 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE EXECUTE ON FUNCTION public.prevent_profile_role_update() FROM PUBLIC, anon, authenticated;
 
 DROP TRIGGER IF EXISTS trg_prevent_profile_role_update ON public.profiles;
 CREATE TRIGGER trg_prevent_profile_role_update
@@ -209,6 +213,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
+REVOKE EXECUTE ON FUNCTION public.check_order_update() FROM PUBLIC, anon, authenticated;
+
 DROP TRIGGER IF EXISTS trg_check_order_update ON public.orders;
 CREATE TRIGGER trg_check_order_update
     BEFORE UPDATE ON public.orders
@@ -267,10 +273,12 @@ CREATE POLICY "Buyers can cancel their own pending orders"
 -- Executes order creation and inventory decrement in ONE transaction.
 -- Locks produce row with FOR UPDATE to prevent race conditions & stock overselling.
 -- ------------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.place_order(TEXT, NUMERIC, UUID, TEXT, TEXT, TEXT, TEXT, TEXT);
+DROP FUNCTION IF EXISTS public.place_order(TEXT, NUMERIC, TEXT, TEXT, TEXT, TEXT, TEXT);
+
 CREATE OR REPLACE FUNCTION public.place_order(
     p_produce_id TEXT,
     p_quantity NUMERIC,
-    p_buyer_id UUID,
     p_buyer_name TEXT,
     p_buyer_email TEXT,
     p_delivery_address TEXT,
@@ -279,6 +287,7 @@ CREATE OR REPLACE FUNCTION public.place_order(
 )
 RETURNS public.orders AS $$
 DECLARE
+    v_buyer_id UUID := auth.uid();
     v_produce public.produce%ROWTYPE;
     v_computed_total NUMERIC;
     v_order_id TEXT;
@@ -286,8 +295,12 @@ DECLARE
     v_order public.orders%ROWTYPE;
     v_buyer_role TEXT;
 BEGIN
+    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'Not authorized';
+    END IF;
+
     -- Verify buyer exists and has 'buyer' role
-    SELECT role INTO v_buyer_role FROM public.profiles WHERE id = p_buyer_id;
+    SELECT role INTO v_buyer_role FROM public.profiles WHERE id = v_buyer_id;
     IF v_buyer_role IS NULL OR v_buyer_role != 'buyer' THEN
         RAISE EXCEPTION 'User must have a registered buyer profile to place an order.';
     END IF;
@@ -357,7 +370,7 @@ BEGIN
         v_produce.farmer_id,
         v_produce.farmer_name,
         v_produce.location,
-        p_buyer_id,
+        v_buyer_id,
         p_buyer_name,
         p_buyer_email,
         p_delivery_address,
@@ -369,6 +382,9 @@ BEGIN
     RETURN v_order;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE EXECUTE ON FUNCTION public.place_order(TEXT, NUMERIC, TEXT, TEXT, TEXT, TEXT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.place_order(TEXT, NUMERIC, TEXT, TEXT, TEXT, TEXT, TEXT) TO authenticated;
 
 
 -- ------------------------------------------------------------------------------

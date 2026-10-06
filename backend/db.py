@@ -433,7 +433,6 @@ class Database:
                 rpc_params = {
                     "p_produce_id": produce_id,
                     "p_quantity": quantity,
-                    "p_buyer_id": buyer_id,
                     "p_buyer_name": buyer_name,
                     "p_buyer_email": buyer_email,
                     "p_delivery_address": delivery_address
