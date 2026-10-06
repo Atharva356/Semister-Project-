@@ -22,6 +22,14 @@ logger = logging.getLogger("agrimandi.app")
 
 def create_app(config_class=Config) -> Flask:
     """Application factory for AgriMandi Flask backend."""
+    import os
+    is_production = (
+        os.environ.get("FLASK_ENV", "").lower() == "production"
+        or "RENDER" in os.environ
+    )
+    if getattr(config_class, "USE_MEMORY_DB", False) and is_production:
+        raise RuntimeError("USE_MEMORY_DB cannot be enabled in production environments")
+
     app = Flask(__name__)
     app.config.from_object(config_class)
 

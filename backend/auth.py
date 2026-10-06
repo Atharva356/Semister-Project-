@@ -47,8 +47,8 @@ def verify_token(token: str):
     Validates token via Supabase Auth or test tokens.
     Returns (user_id, role, name, email) or raises ValueError.
     """
-    # 1. Dev / Test Mock Token Handler
-    if Config.USE_MEMORY_DB or token.startswith("test-") or token.startswith("mock-"):
+    # 1. Dev / Test Mock Token Handler (Only honoured when USE_MEMORY_DB is True)
+    if Config.USE_MEMORY_DB:
         from db import db
         # Formats: test-farmer-<id>, test-buyer-<id>, mock-farmer, mock-buyer
         token_lower = token.lower()
