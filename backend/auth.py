@@ -108,7 +108,7 @@ def verify_token(token: str):
 
         # Retrieve authoritative role from profiles table (not user_metadata)
         from db import db
-        profile = db.get_profile_by_id(uid)
+        profile = db.get_profile_by_id(uid, token=token)
         if profile and profile.get("role"):
             role = profile["role"]
             name = profile.get("full_name") or email.split("@")[0]

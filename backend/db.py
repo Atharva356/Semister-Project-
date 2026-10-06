@@ -198,11 +198,11 @@ class Database:
     # USER PROFILES
     # =========================================================================
 
-    def get_profile_by_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+    def get_profile_by_id(self, user_id: str, token: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Retrieves profile from Supabase or memory store."""
         if Config.is_supabase_configured():
             try:
-                client = self.get_client()
+                client = self.get_client(token)
                 response = client.table("profiles").select("*").eq("id", user_id).execute()
                 if response.data:
                     return response.data[0]

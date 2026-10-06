@@ -60,8 +60,11 @@ CREATE TRIGGER on_auth_user_created
 CREATE OR REPLACE FUNCTION public.prevent_profile_role_update()
 RETURNS TRIGGER AS $$
 BEGIN
+    -- Allow role changes when auth.uid() IS NULL (service role / dashboard / migrations)
     IF NEW.role IS DISTINCT FROM OLD.role THEN
-        RAISE EXCEPTION 'Modifying the profile role is not permitted.';
+        IF auth.uid() IS NOT NULL THEN
+            RAISE EXCEPTION 'Modifying the profile role is not permitted.';
+        END IF;
     END IF;
     NEW.updated_at = NOW();
     RETURN NEW;
@@ -79,13 +82,16 @@ CREATE TRIGGER trg_prevent_profile_role_update
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.profiles;
-CREATE POLICY "Public profiles are viewable by everyone"
+DROP POLICY IF EXISTS "Users can view their own profile" ON public.profiles;
+CREATE POLICY "Users can view their own profile"
     ON public.profiles FOR SELECT
-    USING (true);
+    TO authenticated
+    USING (auth.uid() = id);
 
 DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
 CREATE POLICY "Users can update their own profile"
     ON public.profiles FOR UPDATE
+    TO authenticated
     USING (auth.uid() = id)
     WITH CHECK (auth.uid() = id);
 

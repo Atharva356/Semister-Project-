@@ -17,8 +17,11 @@ ALTER TABLE IF EXISTS public.profiles
 CREATE OR REPLACE FUNCTION public.prevent_profile_role_update()
 RETURNS TRIGGER AS $$
 BEGIN
+    -- Allow role changes when auth.uid() IS NULL (service role / dashboard / migrations)
     IF NEW.role IS DISTINCT FROM OLD.role THEN
-        RAISE EXCEPTION 'Modifying the profile role is not permitted.';
+        IF auth.uid() IS NOT NULL THEN
+            RAISE EXCEPTION 'Modifying the profile role is not permitted.';
+        END IF;
     END IF;
     NEW.updated_at = NOW();
     RETURN NEW;
@@ -366,6 +369,22 @@ GRANT EXECUTE ON FUNCTION public.cancel_order(TEXT) TO authenticated;
 
 
 -- 5. ROW LEVEL SECURITY POLICIES RESET
+-- Reset Profiles policies
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Public profiles are viewable by everyone" ON public.profiles;
+DROP POLICY IF EXISTS "Users can view their own profile" ON public.profiles;
+CREATE POLICY "Users can view their own profile"
+    ON public.profiles FOR SELECT
+    TO authenticated
+    USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Users can update their own profile" ON public.profiles;
+CREATE POLICY "Users can update their own profile"
+    ON public.profiles FOR UPDATE
+    TO authenticated
+    USING (auth.uid() = id)
+    WITH CHECK (auth.uid() = id);
+
 -- Reset Produce policies
 ALTER TABLE public.produce ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Anyone can view produce listings" ON public.produce;
