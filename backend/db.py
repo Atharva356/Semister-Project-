@@ -572,24 +572,21 @@ class Database:
         if Config.is_supabase_configured():
             try:
                 client = self.get_client(token)
-                order_key = "order_id" if target_order.get("order_id") == order_id else "id"
-                response = client.table("orders").update({"status": new_status}).eq(order_key, order_id).execute()
-                if not response.data:
+                if new_status == "Cancelled":
+                    # Call cancel_order RPC (atomic cancellation, permission check, and stock restore)
+                    response = client.rpc("cancel_order", {"p_order_id": order_id}).execute()
+                    if response.data:
+                        order_row = response.data
+                        if isinstance(order_row, list) and len(order_row) > 0:
+                            order_row = order_row[0]
+                        return serialize_order(order_row)
                     return None
-
-                # Restore stock if cancelled and was previously not cancelled
-                if new_status == "Cancelled" and previous_status != "Cancelled" and produce_id:
-                    try:
-                        # Increment quantity in produce
-                        client.rpc("increment_produce_stock", {"p_produce_id": produce_id, "p_quantity": order_qty}).execute()
-                    except Exception as stock_err:
-                        logger.warning(f"Failed to increment produce stock via RPC: {stock_err}. Using direct update.")
-                        prod = self.get_produce_by_id(produce_id)
-                        if prod:
-                            new_qty = float(prod.get("quantity", 0)) + order_qty
-                            client.table("produce").update({"quantity": new_qty}).eq("id", produce_id).execute()
-
-                return serialize_order(response.data[0])
+                else:
+                    order_key = "order_id" if target_order.get("order_id") == order_id else "id"
+                    response = client.table("orders").update({"status": new_status}).eq(order_key, order_id).execute()
+                    if not response.data:
+                        return None
+                    return serialize_order(response.data[0])
             except Exception as e:
                 logger.error(f"Failed to update order status: {e}", exc_info=True)
                 raise DatabaseError(f"Database error updating order status: {e}")
@@ -597,6 +594,8 @@ class Database:
         # Memory store
         for idx, o in enumerate(self._orders_store):
             if o.get("order_id") == order_id or o.get("id") == order_id:
+                if new_status == "Cancelled" and previous_status in ("Cancelled", "Delivered"):
+                    raise ValueError(f"Cannot cancel order with status {previous_status}")
                 self._orders_store[idx]["status"] = new_status
                 # Restore stock on cancellation
                 if new_status == "Cancelled" and previous_status != "Cancelled" and produce_id:

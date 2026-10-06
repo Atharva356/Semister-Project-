@@ -202,14 +202,30 @@ BEGIN
         RAISE EXCEPTION 'Only order status can be updated.';
     END IF;
 
-    -- Buyer can only cancel Pending orders
-    IF auth.uid() = OLD.buyer_id THEN
-        IF OLD.status != 'Pending' OR NEW.status != 'Cancelled' THEN
-            RAISE EXCEPTION 'Buyers may only cancel orders that are in Pending status.';
-        END IF;
+    -- If status hasn't changed, allow
+    IF NEW.status = OLD.status THEN
+        RETURN NEW;
     END IF;
 
-    RETURN NEW;
+    -- Cancellation rule: only allowed via cancel_order function
+    IF NEW.status = 'Cancelled' THEN
+        IF current_setting('agrimandi.in_cancel_order', true) IS DISTINCT FROM 'on' THEN
+            RAISE EXCEPTION 'Direct cancellation is not permitted. Orders must be cancelled via cancel_order.';
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    -- Status transition rules: Pending -> Confirmed -> Dispatched -> Delivered
+    IF (OLD.status = 'Pending' AND NEW.status = 'Confirmed')
+       OR (OLD.status = 'Confirmed' AND NEW.status = 'Dispatched')
+       OR (OLD.status = 'Dispatched' AND NEW.status = 'Delivered') THEN
+        IF auth.uid() IS NOT NULL AND auth.uid() != OLD.farmer_id THEN
+            RAISE EXCEPTION 'Only the assigned farmer can advance order status.';
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    RAISE EXCEPTION 'Invalid status transition from % to %.', OLD.status, NEW.status;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
 
@@ -252,19 +268,13 @@ CREATE POLICY "Buyers can insert their own orders"
         )
     );
 
--- UPDATE: Farmer can update status of their orders
+-- UPDATE: Farmer can update status of their orders (Pending -> Confirmed -> Dispatched -> Delivered)
+-- Note: Cancellation must go through cancel_order() SECURITY DEFINER function.
 CREATE POLICY "Farmers can update status of their orders"
     ON public.orders FOR UPDATE
     TO authenticated
     USING (farmer_id = auth.uid())
     WITH CHECK (farmer_id = auth.uid());
-
--- UPDATE: Buyer can cancel their own pending order
-CREATE POLICY "Buyers can cancel their own pending orders"
-    ON public.orders FOR UPDATE
-    TO authenticated
-    USING (buyer_id = auth.uid() AND status = 'Pending')
-    WITH CHECK (buyer_id = auth.uid() AND status = 'Cancelled');
 
 
 -- ------------------------------------------------------------------------------
@@ -388,7 +398,81 @@ GRANT EXECUTE ON FUNCTION public.place_order(TEXT, NUMERIC, TEXT, TEXT, TEXT, TE
 
 
 -- ------------------------------------------------------------------------------
--- 5. CONDITIONAL SEED PRODUCE DATA
+-- 5. POSTGRES ATOMIC ORDER CANCELLATION FUNCTION
+-- ------------------------------------------------------------------------------
+-- Cancels order and restores produce quantity in ONE atomic transaction.
+-- Locks order row FOR UPDATE.
+-- Verifies caller is buyer (for Pending orders) or farmer (for Pending/Confirmed orders).
+-- No-op error if already Cancelled or Delivered.
+-- ------------------------------------------------------------------------------
+DROP FUNCTION IF EXISTS public.cancel_order(TEXT);
+
+CREATE OR REPLACE FUNCTION public.cancel_order(p_order_id TEXT)
+RETURNS public.orders AS $$
+DECLARE
+    v_order public.orders%ROWTYPE;
+BEGIN
+    IF auth.uid() IS NULL THEN
+        RAISE EXCEPTION 'Not authorized';
+    END IF;
+
+    -- Lock the order row FOR UPDATE
+    SELECT * INTO v_order
+    FROM public.orders
+    WHERE order_id = p_order_id OR id::TEXT = p_order_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'Order not found: %', p_order_id;
+    END IF;
+
+    -- Make it a no-op error if already Cancelled/Delivered
+    IF v_order.status = 'Cancelled' THEN
+        RAISE EXCEPTION 'Order is already Cancelled.';
+    END IF;
+    IF v_order.status = 'Delivered' THEN
+        RAISE EXCEPTION 'Cannot cancel an order that has already been Delivered.';
+    END IF;
+
+    -- Verify auth.uid() is the order's buyer (only if status is Pending) or its farmer (if status is Pending/Confirmed)
+    IF auth.uid() = v_order.buyer_id THEN
+        IF v_order.status != 'Pending' THEN
+            RAISE EXCEPTION 'Buyers can only cancel orders in Pending status.';
+        END IF;
+    ELSIF auth.uid() = v_order.farmer_id THEN
+        IF v_order.status NOT IN ('Pending', 'Confirmed') THEN
+            RAISE EXCEPTION 'Farmers can only cancel orders in Pending or Confirmed status.';
+        END IF;
+    ELSE
+        RAISE EXCEPTION 'Not authorized to cancel this order.';
+    END IF;
+
+    -- Add the quantity back to produce.quantity
+    IF v_order.produce_id IS NOT NULL THEN
+        UPDATE public.produce
+        SET quantity = quantity + v_order.quantity
+        WHERE id = v_order.produce_id;
+    END IF;
+
+    -- Signal trigger that this cancellation comes through cancel_order
+    PERFORM set_config('agrimandi.in_cancel_order', 'on', true);
+
+    -- Update order status to Cancelled
+    UPDATE public.orders
+    SET status = 'Cancelled'
+    WHERE id = v_order.id
+    RETURNING * INTO v_order;
+
+    RETURN v_order;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp;
+
+REVOKE EXECUTE ON FUNCTION public.cancel_order(TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.cancel_order(TEXT) TO authenticated;
+
+
+-- ------------------------------------------------------------------------------
+-- 6. CONDITIONAL SEED PRODUCE DATA
 -- ------------------------------------------------------------------------------
 -- Seeds initial catalogue items only if at least one farmer user exists in profiles.
 -- Prevents foreign key constraint violations on clean installations.
