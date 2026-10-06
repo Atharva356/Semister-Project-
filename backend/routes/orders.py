@@ -1,102 +1,181 @@
-from flask import Blueprint, request, jsonify
-from db import db
+"""
+Orders Routes for AgriMandi API.
+Handles secure order placement, role-based order queries, and status fulfillment transitions.
+"""
 
+import logging
+from flask import Blueprint, g, jsonify, request
+from auth import require_auth, require_role
+from db import DatabaseError, db, serialize_order
+from validation import validate_order_create, validate_status_transition
+
+logger = logging.getLogger("agrimandi.routes.orders")
 orders_bp = Blueprint("orders", __name__)
 
-VALID_STATUSES = ["Pending", "Confirmed", "Dispatched", "Delivered", "Cancelled"]
 
 @orders_bp.route("", methods=["GET"])
+@require_auth
 def get_orders():
     """
     GET /api/orders
-    Query parameters:
-      - buyer_email: filter orders placed by a specific buyer
-      - farmer_name: filter orders for a specific farmer's produce
+    Returns orders scoped to the authenticated caller's identity:
+      - Buyers receive orders they placed (buyer_id == g.user_id)
+      - Farmers receive orders placed for their produce (farmer_id == g.user_id)
     """
-    buyer_email = request.args.get("buyer_email")
-    farmer_name = request.args.get("farmer_name")
+    try:
+        orders = db.get_orders_for_user(
+            user_id=g.user_id,
+            role=g.role,
+            token=getattr(g, "token", None)
+        )
+        return jsonify({
+            "success": True,
+            "count": len(orders),
+            "data": orders
+        }), 200
+    except DatabaseError as e:
+        logger.error(f"Error fetching orders: {e}")
+        return jsonify({"success": False, "error": "Failed to fetch orders"}), 500
 
-    orders = db.get_all_orders(buyer_email=buyer_email, farmer_name=farmer_name)
-    return jsonify({
-        "success": True,
-        "count": len(orders),
-        "data": orders
-    }), 200
 
 @orders_bp.route("/<order_id>", methods=["GET"])
+@require_auth
 def get_single_order(order_id):
     """
     GET /api/orders/<order_id>
-    Retrieve summary details of a specific order.
+    Retrieves summary detail of an order.
+    Caller must be either the ordering buyer or the fulfilling farmer.
     """
-    order = db.get_order_by_id(order_id)
-    if not order:
-        return jsonify({
-            "success": False,
-            "error": "Order not found"
-        }), 404
+    try:
+        order = db.get_order_by_id(order_id, token=getattr(g, "token", None))
+        if not order:
+            return jsonify({
+                "success": False,
+                "error": f"Order '{order_id}' not found"
+            }), 404
 
-    return jsonify({
-        "success": True,
-        "data": order
-    }), 200
+        # Scope enforcement
+        buyer_id = str(order.get("buyer_id") or order.get("buyerId") or "")
+        farmer_id = str(order.get("farmer_id") or order.get("farmerId") or "")
+
+        if g.user_id not in (buyer_id, farmer_id):
+            return jsonify({
+                "success": False,
+                "error": "Forbidden: You are not authorized to view this order"
+            }), 403
+
+        return jsonify({
+            "success": True,
+            "data": serialize_order(order)
+        }), 200
+    except DatabaseError as e:
+        logger.error(f"Error loading order {order_id}: {e}")
+        return jsonify({"success": False, "error": "Failed to retrieve order"}), 500
+
 
 @orders_bp.route("", methods=["POST"])
+@require_role("buyer")
 def create_order():
     """
     POST /api/orders
     Places a new purchase order.
-    Expected payload fields:
-      produceName, quantity, unit, unitPrice, totalPrice,
-      farmerName, farmerLocation, buyerName, buyerEmail, deliveryAddress
+    Requires authenticated 'buyer' role.
+    Unit price and total price are calculated server-side from current database stock;
+    any client-sent prices are strictly ignored to prevent manipulation.
     """
     data = request.get_json(silent=True) or {}
-    
-    required_fields = ["produceName", "quantity", "unitPrice", "totalPrice"]
-    missing = [f for f in required_fields if f not in data]
-    if missing:
-        return jsonify({
-            "success": False,
-            "error": f"Missing required fields: {', '.join(missing)}"
-        }), 400
+    is_valid, err_msg, validated = validate_order_create(data)
+    if not is_valid:
+        return jsonify({"success": False, "error": err_msg}), 400
 
     try:
-        qty = float(data.get("quantity", 0))
-        unit_price = float(data.get("unitPrice", 0))
-        total_price = float(data.get("totalPrice", 0))
-        if qty <= 0 or unit_price < 0 or total_price < 0:
-            return jsonify({"success": False, "error": "Quantities and prices must be positive numbers"}), 400
-    except (ValueError, TypeError):
-        return jsonify({"success": False, "error": "Invalid quantity or price values"}), 400
+        order = db.place_order(
+            produce_id=validated["produce_id"],
+            quantity=validated["quantity"],
+            buyer_id=g.user_id,
+            buyer_name=g.user_name,
+            buyer_email=g.user_email,
+            delivery_address=validated["delivery_address"],
+            token=getattr(g, "token", None)
+        )
+        return jsonify({
+            "success": True,
+            "message": "Order placed successfully",
+            "data": order
+        }), 201
+    except ValueError as e:
+        # Business logic validation errors (e.g. Insufficient stock)
+        return jsonify({"success": False, "error": str(e)}), 400
+    except DatabaseError as e:
+        logger.error(f"Database error during order creation: {e}")
+        error_text = str(e)
+        if "Insufficient stock" in error_text:
+            return jsonify({"success": False, "error": "Insufficient stock available for this order"}), 400
+        return jsonify({"success": False, "error": f"Failed to place order: {error_text}"}), 500
 
-    order = db.create_order(data)
-    return jsonify({
-        "success": True,
-        "message": "Order placed successfully",
-        "data": order
-    }), 201
 
 @orders_bp.route("/<order_id>/status", methods=["PATCH", "PUT"])
+@require_auth
 def update_order_status(order_id):
     """
     PATCH/PUT /api/orders/<order_id>/status
+    Updates fulfillment status of an order.
+    Rules:
+      - Farmers can transition: Pending -> Confirmed -> Dispatched -> Delivered, or Cancelled from Pending/Confirmed.
+      - Buyers can only Cancel their own order if it is in Pending status.
+      - Stock is restored on cancellation.
     Payload: { "status": "Dispatched" }
     """
     data = request.get_json(silent=True) or {}
-    status = data.get("status")
+    new_status = data.get("status")
 
-    if not status or status not in VALID_STATUSES:
+    if not new_status:
+        return jsonify({"success": False, "error": "Status field is required"}), 400
+
+    target_order = db.get_order_by_id(order_id, token=getattr(g, "token", None))
+    if not target_order:
+        return jsonify({"success": False, "error": f"Order '{order_id}' not found"}), 404
+
+    current_status = target_order.get("status", "Pending")
+    buyer_id = str(target_order.get("buyer_id") or target_order.get("buyerId") or "")
+    farmer_id = str(target_order.get("farmer_id") or target_order.get("farmerId") or "")
+
+    # Role and authorization validation
+    if g.role == "farmer":
+        if farmer_id and farmer_id != g.user_id:
+            return jsonify({
+                "success": False,
+                "error": "Forbidden: You can only update orders for your own produce"
+            }), 403
+    elif g.role == "buyer":
+        if buyer_id and buyer_id != g.user_id:
+            return jsonify({
+                "success": False,
+                "error": "Forbidden: You can only cancel your own orders"
+            }), 403
+        if current_status != "Pending" or new_status != "Cancelled":
+            return jsonify({
+                "success": False,
+                "error": "Buyers can only cancel orders that are currently in 'Pending' status"
+            }), 400
+    else:
+        return jsonify({"success": False, "error": "Forbidden: Unrecognized role"}), 403
+
+    # State transition check
+    is_valid_transition, transition_err = validate_status_transition(current_status, new_status, g.role)
+    if not is_valid_transition:
+        return jsonify({"success": False, "error": transition_err}), 400
+
+    try:
+        updated = db.update_order_status(order_id, new_status, token=getattr(g, "token", None))
+        if not updated:
+            return jsonify({"success": False, "error": "Order status could not be updated"}), 404
+
         return jsonify({
-            "success": False,
-            "error": f"Invalid status. Must be one of: {', '.join(VALID_STATUSES)}"
-        }), 400
-
-    updated = db.update_order_status(order_id, status)
-    if not updated:
-        return jsonify({"success": False, "error": "Order not found"}), 404
-
-    return jsonify({
-        "success": True,
-        "message": f"Order status updated to {status}",
-        "data": updated
-    }), 200
+            "success": True,
+            "message": f"Order status updated to '{new_status}'",
+            "data": updated
+        }), 200
+    except DatabaseError as e:
+        logger.error(f"Error updating order status for {order_id}: {e}")
+        return jsonify({"success": False, "error": f"Could not update status: {e}"}), 500

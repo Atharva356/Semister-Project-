@@ -1,96 +1,138 @@
-import os
-from flask import Flask, jsonify
-from flask_cors import CORS
-from supabase import create_client, Client
-from dotenv import load_dotenv
+"""
+AgriMandi Flask Backend Server.
+Direct Farmer-to-Buyer Marketplace REST API.
+"""
 
+import logging
+import sys
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+from config import Config
 from routes.produce import produce_bp
 from routes.orders import orders_bp
 
-# Load environment variables from .env
-load_dotenv()
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG if Config.DEBUG else logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger("agrimandi.app")
 
-app = Flask(__name__)
 
-# Enable CORS so frontend (localhost:5500, etc.) can communicate seamlessly
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+def create_app(config_class=Config) -> Flask:
+    """Application factory for AgriMandi Flask backend."""
+    app = Flask(__name__)
+    app.config.from_object(config_class)
 
-# Initialize Supabase Client
-supabase_url = os.environ.get("SUPABASE_URL")
-supabase_key = os.environ.get("SUPABASE_KEY")
+    # Restrict CORS to configured origins
+    origins = config_class.CORS_ORIGINS
+    logger.info(f"Configuring CORS for origins: {origins}")
+    CORS(
+        app,
+        resources={r"/api/*": {"origins": origins}},
+        supports_credentials=True,
+        allow_headers=["Content-Type", "Authorization"],
+        methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    )
 
-supabase: Client = None
-if supabase_url and supabase_key and "your-project-id" not in supabase_url:
-    try:
-        supabase = create_client(supabase_url, supabase_key)
-        print("[Supabase] Connected to Supabase client successfully.")
-    except Exception as e:
-        print(f"[Supabase] Initialization warning: {e}")
+    # Register Blueprints
+    app.register_blueprint(produce_bp, url_prefix="/api/produce")
+    app.register_blueprint(orders_bp, url_prefix="/api/orders")
 
-# Register AgriMandi API Blueprints
-# Note: Authentication routes are handled entirely by Supabase Auth on the client
-app.register_blueprint(produce_bp, url_prefix="/api/produce")
-app.register_blueprint(orders_bp, url_prefix="/api/orders")
+    # --------------------------------------------------------------------------
+    # Health and Info Endpoints
+    # --------------------------------------------------------------------------
+    @app.route("/")
+    def index():
+        mode = "In-Memory Datastore" if config_class.USE_MEMORY_DB else (
+            "Connected to Supabase Postgres" if config_class.is_supabase_configured() else "Local Fallback (Supabase Unconfigured)"
+        )
+        return jsonify({
+            "service": "AgriMandi REST API",
+            "version": "2.0.0",
+            "status": "online",
+            "database_mode": mode,
+            "endpoints": {
+                "health": "/api/health",
+                "produce": "/api/produce",
+                "orders": "/api/orders"
+            }
+        }), 200
 
-@app.route('/')
-def index():
-    if not supabase:
-        return """
-        <div style="font-family: sans-serif; max-width: 600px; margin: 40px auto; padding: 24px; border: 1px solid #e0e0e0; border-radius: 8px;">
-            <h2>&#127806; AgriMandi Backend Server</h2>
-            <p>Status: <strong>Running</strong></p>
-            <div style="background: #fff3cd; color: #856404; padding: 12px; border-radius: 6px; margin: 16px 0;">
-                &#9888;&#65039; <strong>Supabase Credentials Needed:</strong><br/>
-                Please paste your <code>SUPABASE_URL</code> and <code>SUPABASE_KEY</code> in <code>backend/.env</code>.
-            </div>
-            <h3>Available Endpoints:</h3>
-            <ul>
-                <li><a href="/api/health">/api/health</a> - Health Check</li>
-                <li><a href="/api/produce">/api/produce</a> - Produce Listings</li>
-                <li><a href="/api/orders">/api/orders</a> - Orders API</li>
-            </ul>
-        </div>
-        """
+    @app.route("/api/health")
+    def health():
+        return jsonify({
+            "status": "healthy",
+            "service": "AgriMandi Backend",
+            "version": "2.0.0",
+            "database_configured": config_class.is_supabase_configured(),
+            "use_memory_db": config_class.USE_MEMORY_DB
+        }), 200
 
-    try:
-        # Check 'produce' table in Supabase
-        response = supabase.table('produce').select("*").execute()
-        items = response.data or []
-        html = '<div style="font-family: sans-serif; max-width: 650px; margin: 40px auto; padding: 24px;">'
-        html += '<h2>&#127806; AgriMandi Produce (Connected to Supabase)</h2>'
-        html += '<p style="color: green;">&#9989; Supabase connection active!</p><ul>'
-        for item in items:
-            html += f'<li><strong>{item.get("name")}</strong> ({item.get("category")}) - &#8377;{item.get("price")}/{item.get("unit")}</li>'
-        html += '</ul>'
-        html += '<hr/><p><a href="/api/produce">View JSON API (/api/produce)</a></p></div>'
-        return html
-    except Exception as e:
-        # Fallback for 'todos' table if using Supabase tutorial schema
-        try:
-            response = supabase.table('todos').select("*").execute()
-            todos = response.data or []
-            html = '<div style="font-family: sans-serif; max-width: 600px; margin: 40px auto;"><h1>Todos</h1><ul>'
-            for todo in todos:
-                html += f'<li>{todo.get("name", todo.get("title", "Todo Item"))}</li>'
-            html += '</ul></div>'
-            return html
-        except Exception:
-            return f"""
-            <div style="font-family: sans-serif; max-width: 600px; margin: 40px auto;">
-                <h2>&#9889; Supabase Client Connected</h2>
-                <p>Supabase client is authenticated, but no <code>produce</code> or <code>todos</code> table was found.</p>
-                <p>Run the <code>schema.sql</code> script in your Supabase SQL Editor to create the tables!</p>
-                <p><small>Database message: {e}</small></p>
-            </div>
-            """
+    # --------------------------------------------------------------------------
+    # Global Error Handlers (Return consistent JSON, no stack traces leak)
+    # --------------------------------------------------------------------------
+    @app.errorhandler(400)
+    def handle_bad_request(err):
+        return jsonify({
+            "success": False,
+            "error": getattr(err, "description", "Bad request")
+        }), 400
 
-@app.route('/api/health')
-def health():
-    return jsonify({
-        "status": "healthy",
-        "service": "AgriMandi Backend",
-        "supabase_connected": supabase is not None
-    })
+    @app.errorhandler(401)
+    def handle_unauthorized(err):
+        return jsonify({
+            "success": False,
+            "error": getattr(err, "description", "Unauthorized")
+        }), 401
 
-if __name__ == '__main__':
-    app.run(debug=True)
+    @app.errorhandler(403)
+    def handle_forbidden(err):
+        return jsonify({
+            "success": False,
+            "error": getattr(err, "description", "Forbidden")
+        }), 403
+
+    @app.errorhandler(404)
+    def handle_not_found(err):
+        return jsonify({
+            "success": False,
+            "error": getattr(err, "description", "Endpoint or resource not found")
+        }), 404
+
+    @app.errorhandler(405)
+    def handle_method_not_allowed(err):
+        return jsonify({
+            "success": False,
+            "error": "HTTP method not allowed for this endpoint"
+        }), 405
+
+    @app.errorhandler(500)
+    def handle_internal_server_error(err):
+        logger.error(f"Internal server error: {err}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "An internal server error occurred. Please try again later."
+        }), 500
+
+    @app.errorhandler(Exception)
+    def handle_unhandled_exception(exc):
+        logger.error(f"Unhandled exception caught: {exc}", exc_info=True)
+        return jsonify({
+            "success": False,
+            "error": "An unexpected error occurred. Please try again later."
+        }), 500
+
+    return app
+
+
+# Default app instance
+app = create_app()
+
+if __name__ == "__main__":
+    app.run(
+        host=Config.HOST,
+        port=Config.PORT,
+        debug=Config.DEBUG
+    )
