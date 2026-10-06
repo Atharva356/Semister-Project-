@@ -54,15 +54,25 @@ def verify_token(token: str):
         token_lower = token.lower()
         if "farmer" in token_lower:
             role = "farmer"
-            uid = token.replace("test-farmer-", "").replace("mock-farmer-", "")
-            if uid in ("test-farmer", "mock-farmer", token):
+            if token in ("test-farmer", "mock-farmer", "test-farmer-demo-uuid-1", "mock-farmer-demo-uuid-1"):
+                uid = "farmer-demo-uuid-1"
+            elif token.startswith("test-farmer-"):
+                uid = token[len("test-farmer-"):]
+            elif token.startswith("mock-farmer-"):
+                uid = token[len("mock-farmer-"):]
+            else:
                 uid = "farmer-demo-uuid-1"
             name = "Rameshwar Patel"
             email = "farmer@example.com"
         elif "buyer" in token_lower:
             role = "buyer"
-            uid = token.replace("test-buyer-", "").replace("mock-buyer-", "")
-            if uid in ("test-buyer", "mock-buyer", token):
+            if token in ("test-buyer", "mock-buyer", "test-buyer-demo-uuid-1", "mock-buyer-demo-uuid-1"):
+                uid = "buyer-demo-uuid-1"
+            elif token.startswith("test-buyer-"):
+                uid = token[len("test-buyer-"):]
+            elif token.startswith("mock-buyer-"):
+                uid = token[len("mock-buyer-"):]
+            else:
                 uid = "buyer-demo-uuid-1"
             name = "Ananya Sharma"
             email = "buyer@example.com"
