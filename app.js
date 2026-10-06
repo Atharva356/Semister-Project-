@@ -168,11 +168,12 @@ function initAuthForms() {
   // Login Form Handler
   const loginForm = document.getElementById("loginForm");
   if (loginForm) {
-    loginForm.addEventListener("submit", (e) => {
+    loginForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const email = document.getElementById("email").value.trim();
       const password = document.getElementById("password").value.trim();
       const role = document.getElementById("role").value;
+      const submitBtn = document.getElementById("loginSubmitBtn");
 
       let isValid = true;
 
@@ -195,19 +196,55 @@ function initAuthForms() {
 
       if (!isValid) return;
 
-      // Mock session storage
-      const user = {
-        name: email.split("@")[0].replace(".", " "),
-        email: email,
-        role: role
-      };
-      setCurrentUser(user);
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Verifying with Supabase...";
+      }
 
+      // Verify that Supabase authentication module is loaded
+      if (!window.agriMandiSupabase || !window.agriMandiSupabase.isConfigured()) {
+        showToast("Supabase is not configured yet. Please check your credentials.", "error");
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Sign In to AgriMandi";
+        }
+        return;
+      }
+
+      const result = await window.agriMandiSupabase.signIn(email, password);
+      if (result.error) {
+        showToast(result.error.message || "Invalid email or password", "error");
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Sign In to AgriMandi";
+        }
+        return;
+      }
+
+      if (!result.user) {
+        showToast("Invalid credentials. Please check your email and password.", "error");
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Sign In to AgriMandi";
+        }
+        return;
+      }
+
+      const meta = result.user.user_metadata || {};
+      const user = {
+        id: result.user.id,
+        name: meta.name || meta.full_name || email.split("@")[0].replace(".", " "),
+        email: result.user.email || email,
+        role: meta.role || role,
+        location: meta.location || "India"
+      };
+
+      setCurrentUser(user);
       showToast(`Welcome back, ${user.name}! Redirecting...`);
 
       // Role-based redirection
       setTimeout(() => {
-        if (role === "farmer") {
+        if (user.role === "farmer") {
           window.location.href = "farmer-dashboard.html";
         } else {
           window.location.href = "buyer-dashboard.html";
@@ -219,13 +256,14 @@ function initAuthForms() {
   // Register Form Handler
   const registerForm = document.getElementById("registerForm");
   if (registerForm) {
-    registerForm.addEventListener("submit", (e) => {
+    registerForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       const name = document.getElementById("name").value.trim();
       const email = document.getElementById("email").value.trim();
       const password = document.getElementById("password").value.trim();
       const role = document.getElementById("role").value;
       const location = document.getElementById("location") ? document.getElementById("location").value.trim() : "";
+      const submitBtn = document.getElementById("registerSubmitBtn");
 
       let isValid = true;
 
@@ -253,14 +291,49 @@ function initAuthForms() {
 
       if (!isValid) return;
 
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Creating account in Supabase...";
+      }
+
+      // Verify that Supabase authentication module is loaded
+      if (!window.agriMandiSupabase || !window.agriMandiSupabase.isConfigured()) {
+        showToast("Supabase is not configured yet. Please check your credentials.", "error");
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Create My Account";
+        }
+        return;
+      }
+
+      const result = await window.agriMandiSupabase.signUp(email, password, { name, role, location });
+      if (result.error) {
+        showToast(result.error.message || "Registration failed", "error");
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Create My Account";
+        }
+        return;
+      }
+
+      if (!result.user) {
+        showToast("Registration failed. Please check your details.", "error");
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Create My Account";
+        }
+        return;
+      }
+
       const user = {
+        id: result.user.id,
         name: name,
         email: email,
         role: role,
         location: location || "Maharashtra, India"
       };
-      setCurrentUser(user);
 
+      setCurrentUser(user);
       showToast("Account created successfully! Redirecting...");
 
       setTimeout(() => {
@@ -827,9 +900,34 @@ function updateNavigationState() {
   // Display user name if logged in
   const user = getCurrentUser();
   const userBadge = document.getElementById("navUserBadge");
+  const loginBtn = document.getElementById("navLoginBtn");
+  const registerBtn = document.getElementById("navRegisterBtn");
+
   if (userBadge && user) {
-    userBadge.textContent = `👤 ${user.name} (${user.role.toUpperCase()})`;
+    const roleLabel = user.role === "farmer" ? "\uD83D\uDE9C FARMER" : "\uD83D\uDED2 BUYER";
+    userBadge.textContent = roleLabel + " | " + user.name + " \u2022 Sign Out";
     userBadge.style.display = "inline-flex";
+    userBadge.style.cursor = "pointer";
+    userBadge.title = "Click to sign out";
+    userBadge.onclick = async () => {
+      if (confirm("Do you want to sign out from " + user.name + "?")) {
+        if (window.agriMandiSupabase) {
+          await window.agriMandiSupabase.signOut();
+        } else {
+          localStorage.removeItem("agrimandi_user");
+        }
+        showToast("Signed out successfully.");
+        setTimeout(() => {
+          window.location.href = "login.html";
+        }, 500);
+      }
+    };
+    if (loginBtn) loginBtn.style.display = "none";
+    if (registerBtn) registerBtn.style.display = "none";
+  } else {
+    if (userBadge) userBadge.style.display = "none";
+    if (loginBtn) loginBtn.style.display = "";
+    if (registerBtn) registerBtn.style.display = "";
   }
 }
 

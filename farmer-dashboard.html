@@ -26,8 +26,8 @@
       </nav>
 
       <div class="nav-auth-buttons">
-        <span class="badge badge-earth">🚜 Farmer Portal</span>
-        <a href="buyer-dashboard.html" class="btn btn-outline btn-sm">Switch to Buyer View</a>
+        <span id="navUserBadge" class="badge badge-earth" style="display: none;"></span>
+        <a href="login.html" class="btn btn-outline btn-sm" id="navLoginBtn">Login</a>
       </div>
     </div>
   </header>
@@ -276,6 +276,8 @@
     </div>
   </footer>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabaseClient.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

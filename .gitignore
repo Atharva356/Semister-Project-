@@ -19,3 +19,13 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Python & Environment
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+backend/.env
+
