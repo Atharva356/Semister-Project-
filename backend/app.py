@@ -7,17 +7,14 @@ import logging
 import sys
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from werkzeug.exceptions import HTTPException
 from config import Config
+from logger import configure_logging
 from routes.produce import produce_bp
 from routes.orders import orders_bp
 
-# Configure logging
-logging.basicConfig(
-    level=logging.DEBUG if Config.DEBUG else logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-logger = logging.getLogger("agrimandi.app")
+# Configure structured JSON logging
+logger = configure_logging(debug=Config.DEBUG)
 
 
 def create_app(config_class=Config) -> Flask:
@@ -46,6 +43,24 @@ def create_app(config_class=Config) -> Flask:
     app.register_blueprint(orders_bp, url_prefix="/api/orders")
 
     # --------------------------------------------------------------------------
+    # Request Logging
+    # --------------------------------------------------------------------------
+    @app.after_request
+    def log_request_outcome(response):
+        # Avoid flooding logs with frequent health check polls
+        if request.path != "/api/health":
+            logger.info(
+                f"{request.method} {request.path} {response.status_code}",
+                extra={
+                    "method": request.method,
+                    "path": request.path,
+                    "status_code": response.status_code,
+                    "ip": request.headers.get("X-Forwarded-For", request.remote_addr),
+                }
+            )
+        return response
+
+    # --------------------------------------------------------------------------
     # Health and Info Endpoints
     # --------------------------------------------------------------------------
     @app.route("/")
@@ -67,16 +82,24 @@ def create_app(config_class=Config) -> Flask:
 
     @app.route("/api/health")
     def health():
+        from db import db
+        is_connected, msg, details = db.check_connection()
+        status_code = 200 if is_connected else 503
         return jsonify({
-            "status": "healthy",
+            "status": "healthy" if is_connected else "unhealthy",
             "service": "AgriMandi Backend",
             "version": "2.0.0",
             "database_configured": config_class.is_supabase_configured(),
-            "use_memory_db": config_class.USE_MEMORY_DB
-        }), 200
+            "use_memory_db": config_class.USE_MEMORY_DB,
+            "database": {
+                "connected": is_connected,
+                "message": msg,
+                **details
+            }
+        }), status_code
 
     # --------------------------------------------------------------------------
-    # Global Error Handlers (Return consistent JSON, no stack traces leak)
+    # Global Error Handlers (Return consistent JSON, never leak stack traces)
     # --------------------------------------------------------------------------
     @app.errorhandler(400)
     def handle_bad_request(err):
@@ -113,20 +136,21 @@ def create_app(config_class=Config) -> Flask:
             "error": "HTTP method not allowed for this endpoint"
         }), 405
 
-    @app.errorhandler(500)
-    def handle_internal_server_error(err):
-        logger.error(f"Internal server error: {err}", exc_info=True)
+    @app.errorhandler(HTTPException)
+    def handle_http_exception(err):
         return jsonify({
             "success": False,
-            "error": "An internal server error occurred. Please try again later."
-        }), 500
+            "error": getattr(err, "description", "An HTTP error occurred")
+        }), getattr(err, "code", 500)
 
     @app.errorhandler(Exception)
     def handle_unhandled_exception(exc):
-        logger.error(f"Unhandled exception caught: {exc}", exc_info=True)
+        # Log stack trace to structured JSON log for server debugging
+        logger.error(f"Unhandled server error: {exc}", exc_info=True)
+        # Return generic safe JSON response without stack traces or sensitive internal details
         return jsonify({
             "success": False,
-            "error": "An unexpected error occurred. Please try again later."
+            "error": "An internal server error occurred. Please try again later."
         }), 500
 
     return app

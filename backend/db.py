@@ -194,6 +194,44 @@ class Database:
             logger.error(f"Failed to create Supabase client: {e}", exc_info=True)
             raise DatabaseError(f"Database connection error: {e}")
 
+    def check_connection(self) -> Tuple[bool, str, Dict[str, Any]]:
+        """
+        Verifies database connectivity for /api/health endpoint.
+        Returns (is_connected, status_message, details_dict).
+        """
+        if Config.USE_MEMORY_DB:
+            return True, "In-memory datastore active", {
+                "mode": "in_memory",
+                "produce_count": len(self._produce_store),
+                "profiles_count": len(self._profiles_store),
+                "orders_count": len(self._orders_store)
+            }
+
+        if not Config.is_supabase_configured():
+            return False, "Supabase credentials are not configured", {
+                "mode": "unconfigured"
+            }
+
+        try:
+            import time
+            start = time.time()
+            client = self.get_client()
+            if not client:
+                return False, "Supabase client initialization failed", {"mode": "supabase"}
+            # Lightweight ping query against produce table
+            res = client.table("produce").select("id").limit(1).execute()
+            latency_ms = round((time.time() - start) * 1000, 2)
+            return True, "Connected to Supabase PostgreSQL", {
+                "mode": "supabase_postgres",
+                "latency_ms": latency_ms
+            }
+        except Exception as e:
+            logger.error(f"Database ping check failed: {e}", exc_info=True)
+            return False, f"Database connectivity check failed: {str(e)}", {
+                "mode": "supabase_postgres",
+                "error": str(e)
+            }
+
     # =========================================================================
     # USER PROFILES
     # =========================================================================

@@ -284,3 +284,62 @@ def test_public_produce_search_and_pagination(client):
     res_health = client.get("/api/health")
     assert res_health.status_code == 200
     assert res_health.get_json()["status"] == "healthy"
+    assert res_health.get_json()["database"]["connected"] is True
+
+
+def test_health_check_unhealthy_when_db_down(client, monkeypatch):
+    """When DB connectivity check fails, /api/health must return 503 and status 'unhealthy'."""
+    from db import db
+    monkeypatch.setattr(db, "check_connection", lambda: (False, "PostgreSQL connection refused", {"error": "refused"}))
+
+    res = client.get("/api/health")
+    assert res.status_code == 503
+    data = res.get_json()
+    assert data["status"] == "unhealthy"
+    assert data["database"]["connected"] is False
+    assert "PostgreSQL connection refused" in data["database"]["message"]
+
+
+def test_global_error_handler_never_leaks_traceback(client, monkeypatch):
+    """Unhandled server errors must return 500 with generic safe message, never leaking stack traces."""
+    from db import db
+    def mock_broken_get(*args, **kwargs):
+        raise RuntimeError("Sensitive internal database secret or stack trace details")
+
+    monkeypatch.setattr(db, "get_all_produce", mock_broken_get)
+
+    res = client.get("/api/produce")
+    assert res.status_code == 500
+    data = res.get_json()
+    assert data["success"] is False
+    assert data["error"] == "An internal server error occurred. Please try again later."
+    # Ensure sensitive traceback details were not leaked in the HTTP response
+    response_text = res.get_data(as_text=True)
+    assert "Sensitive internal database secret" not in response_text
+    assert "Traceback" not in response_text
+    assert "File \"" not in response_text
+
+
+def test_structured_json_logger():
+    """Structured JSON formatter must format log records as valid JSON lines."""
+    import json
+    import logging
+    from logger import JSONFormatter
+
+    formatter = JSONFormatter()
+    record = logging.LogRecord(
+        name="agrimandi.test",
+        level=logging.INFO,
+        pathname="test.py",
+        lineno=10,
+        msg="User %s logged in",
+        args=("buyer-1",),
+        exc_info=None
+    )
+    output = formatter.format(record)
+    parsed = json.loads(output)
+    assert parsed["level"] == "INFO"
+    assert parsed["logger"] == "agrimandi.test"
+    assert parsed["message"] == "User buyer-1 logged in"
+    assert "timestamp" in parsed
+
