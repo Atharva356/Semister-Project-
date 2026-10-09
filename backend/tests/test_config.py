@@ -3,7 +3,6 @@ Unit tests for AgriMandi Configuration and Environment Handling.
 Verifies fail-fast validation and environment variable parsing.
 """
 
-import os
 import pytest
 from config import Config
 

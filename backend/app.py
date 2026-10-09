@@ -3,8 +3,6 @@ AgriMandi Flask Backend Server.
 Direct Farmer-to-Buyer Marketplace REST API.
 """
 
-import logging
-import sys
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException

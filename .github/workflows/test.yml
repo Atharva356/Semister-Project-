@@ -1,23 +1,21 @@
-name: Backend Tests & CI
+name: CI & Quality Assurance
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, production-ready ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, production-ready ]
 
 jobs:
-  test:
+  lint-and-test:
+    name: Lint (Ruff) & Pytest Suite
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: backend
 
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -26,11 +24,35 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r backend/requirements.txt ruff
 
-      - name: Run pytest test suite in memory mode
+      - name: Run Ruff Lint Check
+        run: |
+          ruff check backend/
+
+      - name: Run Pytest Test Suite (In-Memory DB Mode)
         env:
           USE_MEMORY_DB: "true"
           DEBUG: "false"
         run: |
-          pytest tests/ -v
+          pytest backend/tests/ -v
+
+  deploy:
+    name: Deploy to Production (Gated on main)
+    needs: [lint-and-test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Trigger Render Deploy Hook (Optional)
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -n "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "🚀 Triggering production deployment on Render..."
+            curl -s -S -X POST "$RENDER_DEPLOY_HOOK_URL"
+            echo "✅ Deploy hook triggered successfully."
+          else
+            echo "ℹ️ RENDER_DEPLOY_HOOK_URL secret is not set. Skipping automatic webhook deploy."
+            echo "   (Render will auto-deploy via its own native GitHub integration if connected)."
+          fi

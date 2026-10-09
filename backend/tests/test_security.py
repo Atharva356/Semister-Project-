@@ -4,7 +4,6 @@ Tests critical security boundaries, token bypass prevention, authorization spoof
 and cancellation stock restoration across roles.
 """
 
-import os
 from unittest.mock import patch
 import pytest
 from app import create_app

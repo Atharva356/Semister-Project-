@@ -219,7 +219,7 @@ class Database:
             if not client:
                 return False, "Supabase client initialization failed", {"mode": "supabase"}
             # Lightweight ping query against produce table
-            res = client.table("produce").select("id").limit(1).execute()
+            client.table("produce").select("id").limit(1).execute()
             latency_ms = round((time.time() - start) * 1000, 2)
             return True, "Connected to Supabase PostgreSQL", {
                 "mode": "supabase_postgres",

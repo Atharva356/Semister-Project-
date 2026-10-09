@@ -1,0 +1,11 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+# Basic lint rules: E (pycodestyle errors), F (Pyflakes), W (pycodestyle warnings)
+select = ["E", "F", "W"]
+ignore = [
+    "E501",  # line length violations
+    "E402",  # module level import not at top of file (used conditionally for test fixtures/env)
+]
