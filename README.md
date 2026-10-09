@@ -1,294 +1,271 @@
 # AgriMandi 🌾
 
-> Connecting Farmers Directly to Buyers — Fair Pricing, Fresh Harvests, Zero Middlemen.
+> **Farmer-to-Buyer Direct Agricultural Marketplace**  
+> Fair pricing, fresh harvest, and zero middleman exploitation. Built for real farmers and wholesale/consumer buyers in India.
 
-AgriMandi is a modern agricultural marketplace web application designed to empower farmers and agricultural producers by connecting them directly with consumers, restaurants, and wholesale buyers. By eliminating intermediaries and traders, farmers secure better profit margins while buyers receive fresher produce at fair, transparent rates.
+AgriMandi connects rural farmers directly with consumers, restaurants, and retail buyers. By cutting out commission agents and traders, farmers earn fair remuneration while buyers receive verified, farm-fresh produce at transparent mandi rates.
 
 ---
 
-## 🏛️ System Architecture
+## 🏛️ Architecture & Technology Stack
 
 ```
 +-------------------------------------------------------------+
 |                      Client Frontend                        |
-|   HTML5 + Vanilla CSS + Vanilla JavaScript (Pure Client)    |
-|   - Supabase Auth (Sign-in / Sign-up / Session JWT)         |
-|   - Supabase Storage (Produce images bucket)                |
+|   Static HTML5 + Modern CSS + Vanilla JavaScript (No Build) |
+|   - Supabase Auth (Sign-in / Sign-up / Password Recovery)   |
+|   - Supabase Storage (Crop images bucket)                   |
 |   - api.js (Transmits Authorization: Bearer <jwt>)          |
 +------------------------------+------------------------------+
                                |
                                | HTTP Bearer JWT
                                v
 +-------------------------------------------------------------+
-|                     Flask API Layer                         |
-|   - @require_auth and @require_role decorators              |
-|   - Authoritative profile role verification                 |
-|   - Per-request Supabase client with user Authorization     |
-|   - In-memory data store fallback (for offline tests/dev)   |
+|               Flask REST API (Python 3.11+)                 |
+|   - Gunicorn WSGI (2-4 workers)                             |
+|   - Structured JSON logging & fail-fast config validation   |
+|   - Database-aware /api/health ping check                   |
+|   - Per-request Supabase client with user Bearer JWT        |
+|   - In-memory mock store (for offline tests/dev)            |
 +------------------------------+------------------------------+
                                |
                                | PostgREST / RPC calls
                                v
 +-------------------------------------------------------------+
 |                 Supabase Cloud Database                     |
-|   - PostgreSQL with Row Level Security (RLS) enforcement   |
+|   - PostgreSQL with strict Row Level Security (RLS)         |
 |   - Profiles, Produce, and Orders tables                    |
-|   - Atomic place_order(...) function with FOR UPDATE lock  |
-|   - Strict role immutability triggers on profiles           |
+|   - Atomic place_order & cancel_order stored procedures     |
+|   - Role immutability triggers on profiles                  |
 +------------------------------+------------------------------+
 ```
 
----
-
-## 🛠️ Technology Stack
-
-- **Frontend**: Plain HTML5, Modern Vanilla CSS (`style.css`), Vanilla JavaScript (`app.js`, `api.js`, `supabaseClient.js`, `config.js`). No frameworks or build step required.
-- **Authentication & Storage**: [Supabase](https://supabase.com) (Supabase Auth with JWT tokens, Supabase Storage for crop images).
-- **Backend API**: Python 3.11+, [Flask](https://flask.palletsprojects.com/) (Application factory, Blueprints, CORS).
-- **Production Server**: Gunicorn WSGI.
-- **Database & Security**: Supabase PostgreSQL with Row Level Security (RLS) policies, atomic stored procedures, and foreign key indexes.
-- **Automated Testing & CI**: Pytest, Flask Test Client, GitHub Actions (`.github/workflows/test.yml`).
+- **Frontend**: Plain HTML5, Vanilla CSS (`style.css`), Vanilla JavaScript (`app.js`, `api.js`, `supabaseClient.js`). No frameworks or bundler needed.
+- **Backend API**: Python 3.11+, Flask (App factory, Blueprints, CORS, strict JSON error handlers).
+- **Production Server**: Gunicorn WSGI server (`wsgi.py`).
+- **Database & Auth**: [Supabase](https://supabase.com) (Auth, PostgreSQL with RLS, Storage).
+- **CI / Testing**: Pytest (26 unit/integration tests), Ruff linter, GitHub Actions.
 
 ---
 
-## 🔐 Security & Authorization Model
+## ⚡ Deploy in 15 Minutes (Step-by-Step Production Guide)
 
-1. **Supabase Auth on the Frontend**: Users authenticate directly with Supabase. User passwords never touch the Flask server.
-2. **Bearer Token Transmission**: The frontend client automatically includes the Supabase session access token as `Authorization: Bearer <jwt>` on all mutating operations and order queries.
-3. **Per-Request RLS Context**: The Flask backend constructs a per-request client passing the user's Bearer token. Supabase evaluates `auth.uid()` against PostgreSQL Row Level Security (RLS) policies.
-4. **Authoritative Roles**: Roles (`farmer` vs `buyer`) are strictly stored in the `public.profiles` database table and protected by database triggers that reject unauthorized role modifications.
-5. **Server-Side Price Calculation**: When placing an order, the server locks the item row (`SELECT ... FOR UPDATE`), checks stock, decrements quantity, and calculates the total price from the database rate. Any client-submitted prices are ignored.
-6. **XSS Protection**: Dynamic DOM insertions use `escapeHtml()` sanitization and event delegation (`data-id` / `data-order-id`), eliminating inline `onclick` string injection vectors.
+Follow this guide to deploy your live instance of AgriMandi on **Render** (Backend API), **Netlify** (Frontend), and **Supabase** (Database & Auth).
 
----
+### Step 1: Create Supabase Project & Run SQL Scripts
 
-## 🚀 Setup & Installation Guide
-
-### Prerequisites
-
-- Python 3.10+ installed
-- Modern web browser
-- (Optional for cloud DB) A free [Supabase](https://supabase.com) account
-
----
-
-### Step 1: Database Setup (Supabase)
-
-1. Open your [Supabase Dashboard](https://supabase.com/dashboard) and create a new project.
-2. Navigate to **SQL Editor -> New Query**.
-3. Copy and run the contents of [`backend/schema.sql`](backend/schema.sql) (or [`backend/migration.sql`](backend/migration.sql) if upgrading an existing v1 database).
-4. Create a public Storage bucket named `produce-images`:
-   - Go to **Storage -> New Bucket**
-   - Bucket name: `produce-images`
-   - Set to **Public bucket**
-5. Retrieve your project credentials from **Project Settings -> API**:
-   - `Project URL`
-   - `anon public key`
+1. Log in to [Supabase](https://supabase.com) and click **New project**. Choose a strong database password and select a region close to your users (e.g., `South Asia (Mumbai)`).
+2. Go to **SQL Editor -> New Query**.
+3. Run the numbered scripts located in [`backend/sql/`](backend/sql/) in exact numerical order:
+   - `01_tables_and_triggers.sql`: Creates `profiles`, `produce`, and `orders` tables plus data integrity triggers.
+   - `02_security_and_rls.sql`: Enables Row Level Security (RLS) on all tables.
+   - `03_rpc_functions.sql`: Installs atomic `place_order` and `cancel_order` PL/pgSQL functions.
+   - `04_storage_bucket.sql`: Creates the public `produce-images` bucket with upload restrictions.
+   - `05_indexes_and_performance.sql`: Creates performance indexes for fast catalog search and order history.
+4. Retrieve your API credentials:
+   - Go to **Project Settings -> API**.
+   - Note down **Project URL** (`https://<project-id>.supabase.co`) and **anon public key**.
 
 ---
 
-### Step 2: Backend Setup (Flask API)
+### Step 2: Deploy Flask API on Render
 
-1. Open a terminal and navigate to `backend/`:
+1. Log in to [Render](https://render.com) and click **New + -> Web Service**.
+2. Connect your GitHub repository (`Atharva356/Semister-Project-` or fork).
+3. Set the following configuration:
+   - **Name**: `agrimandi-api`
+   - **Language**: `Python 3`
+   - **Root Directory**: Leave blank (uses repo root)
+   - **Build Command**: `cd backend && pip install --upgrade pip && pip install -r requirements.txt`
+   - **Start Command**: `cd backend && gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 4 --threads 2 --timeout 120`
+   - **Health Check Path**: `/api/health`
+4. Add the following **Environment Variables**:
+   | Key | Value | Description |
+   |---|---|---|
+   | `ENVIRONMENT` | `production` | Enables production safeguards |
+   | `DEBUG` | `false` | Disables debug mode |
+   | `USE_MEMORY_DB` | `false` | Connects to live Supabase Postgres |
+   | `SECRET_KEY` | *(Generate a 32-char hex string)* | Cryptographic session secret |
+   | `SUPABASE_URL` | `https://<your-project-id>.supabase.co` | Your Supabase project URL |
+   | `SUPABASE_KEY` | *(Your Supabase anon or service-role key)* | Supabase API key |
+   | `CORS_ORIGINS` | `https://<your-site>.netlify.app` | Your frontend Netlify URL (update once deployed) |
+5. Click **Create Web Service**. Wait for the deployment to finish and copy your Render URL (e.g., `https://agrimandi-api.onrender.com`).
+6. Test your live health endpoint:
    ```bash
-   cd backend
+   curl -i https://agrimandi-api.onrender.com/api/health
+   # Should return HTTP 200 with {"status":"healthy", "database": {"connected": true}}
    ```
-2. Create and activate a virtual environment:
-   ```bash
-   # Windows
-   python -m venv .venv
-   .\.venv\Scripts\activate
-
-   # macOS / Linux
-   python3 -m venv .venv
-   source .venv/bin/activate
-   ```
-3. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Configure your environment variables:
-   ```bash
-   cp .env.example .env
-   ```
-   Edit `backend/.env`:
-   ```env
-   PORT=5000
-   HOST=0.0.0.0
-   DEBUG=False
-   USE_MEMORY_DB=false
-   CORS_ORIGINS=http://localhost:5500,http://127.0.0.1:5500,http://localhost:3000
-   SUPABASE_URL=https://your-project-id.supabase.co
-   SUPABASE_KEY=your-supabase-anon-or-service-role-key
-   ```
-   *(Note: To run offline without Supabase credentials, set `USE_MEMORY_DB=true`)*
-
-5. Start the Flask server:
-   ```bash
-   python app.py
-   ```
-   The backend API will run at **`http://localhost:5000`**.
 
 ---
 
-### Step 3: Frontend Setup
+### Step 3: Deploy Frontend on Netlify
 
-1. Copy the example frontend configuration:
+1. Log in to [Netlify](https://netlify.com) and click **Add new site -> Import an existing project**.
+2. Select your GitHub repository.
+3. Configure build settings:
+   - **Base directory**: Leave blank
+   - **Build command**: `node scripts/build-config.js`
+   - **Publish directory**: `.`
+4. Click **Environment variables** and add:
+   | Key | Value | Description |
+   |---|---|---|
+   | `API_BASE_URL` | `https://agrimandi-api.onrender.com` | Deployed Render API URL |
+   | `SUPABASE_URL` | `https://<your-project-id>.supabase.co` | Supabase Project URL |
+   | `SUPABASE_ANON_KEY` | *(Your Supabase anon key)* | Supabase Public Anon Key |
+5. Click **Deploy AgriMandi**. Netlify will run `scripts/build-config.js` to generate `config.js` and serve your static assets with security headers defined in `netlify.toml`.
+6. Copy your Netlify site URL (e.g., `https://agrimandi.netlify.app`).
+7. **Important**: Go back to Render -> `agrimandi-api` -> **Environment** and update `CORS_ORIGINS` to match your Netlify URL:
+   ```
+   CORS_ORIGINS=https://agrimandi.netlify.app
+   ```
+
+---
+
+### Step 4: Configure Supabase Auth Redirect URLs
+
+1. In the Supabase Dashboard, navigate to **Authentication -> URL Configuration**.
+2. Set **Site URL** to:
+   ```
+   https://agrimandi.netlify.app
+   ```
+3. In **Redirect URLs (Allow list)**, add:
+   ```
+   https://agrimandi.netlify.app/**
+   https://agrimandi.netlify.app/reset-password.html
+   https://agrimandi.netlify.app/login.html
+   http://localhost:5500/**
+   http://127.0.0.1:5500/**
+   http://localhost:8080/**
+   ```
+4. Click **Save**.
+
+---
+
+### Step 5: Create First Accounts & Seed Produce
+
+1. Open your deployed Netlify site (`https://agrimandi.netlify.app/register.html`).
+2. Create your first user account:
+   - **Full Name**: `Rameshwar Patel`
+   - **Email**: `farmer@example.com`
+   - **Role**: Select **🚜 Farmer (Sell Produce)**
+   - **Location**: `Sehore, Madhya Pradesh`
+3. *(Optional)* Seed initial catalog listings:
+   - In Supabase SQL Editor, run [`backend/sql/06_seed_catalog.sql`](backend/sql/06_seed_catalog.sql).
+   - This script automatically links sample crops (wheat, tomatoes, apples, onions, rice) to your newly created farmer account!
+4. Register a second account as a **🛒 Buyer** (`buyer@example.com`).
+5. Browse produce, place a purchase order, view confirmation with tracking number, and see stock decrement in real-time.
+
+---
+
+## 💻 Local Development Setup
+
+### Option A: Local Python & Browser (Recommended for quick testing)
+
+1. Clone repository:
+   ```bash
+   git clone https://github.com/Atharva356/Semister-Project-.git
+   cd Semister-Project-
+   ```
+2. Configure frontend:
    ```bash
    cp config.example.js config.js
    ```
-2. Update `config.js` with your API and Supabase values:
-   ```javascript
-   window.AGRIMANDI_CONFIG = {
-     apiBaseUrl: "http://localhost:5000",
-     supabaseUrl: "https://your-project-id.supabase.co",
-     supabaseAnonKey: "your-supabase-anon-key"
-   };
-   ```
-3. Start any lightweight static web server in the repository root:
+3. Start backend in offline mock mode (zero Supabase setup required):
    ```bash
-   # Using Python
-   python -m http.server 5500
-
-   # Or using Node
-   npx serve .
+   cd backend
+   python -m venv .venv
+   # Windows: .\.venv\Scripts\activate | macOS/Linux: source .venv/bin/activate
+   pip install -r requirements.txt
+   
+   # Enable offline in-memory database
+   cp .env.example .env
+   # Set USE_MEMORY_DB=true in .env
+   python app.py
    ```
-4. Open **`http://localhost:5500`** in your browser.
+4. In another terminal, serve the frontend:
+   ```bash
+   # From project root
+   python -m http.server 5500
+   ```
+5. Open `http://localhost:5500` in your browser.
 
 ---
 
-### Step 4: Creating Demo Accounts
+### Option B: Docker Compose (One-command setup)
 
-1. Open `http://localhost:5500/register.html`.
-2. **Farmer Account**:
-   - Full Name: `Rameshwar Patel`
-   - Email: `farmer@example.com`
-   - Password: `password123`
-   - Role: `🚜 Farmer (I want to sell my produce)`
-   - Location: `Sehore, Madhya Pradesh`
-3. **Buyer Account**:
-   - Full Name: `Ananya Sharma`
-   - Email: `buyer@example.com`
-   - Password: `password123`
-   - Role: `🛒 Buyer (I want to buy fresh produce)`
-   - Location: `Pune, Maharashtra`
-4. Once your farmer account is registered, run [`backend/seed.sql`](backend/seed.sql) in your Supabase SQL editor to link the sample crop listings to that farmer.
+```bash
+docker compose up --build
+```
+- Frontend available at: `http://localhost:8080`
+- Backend API available at: `http://localhost:5000`
 
 ---
 
-## 📡 REST API Summary
+## 🧪 Testing & Quality Assurance
 
-### Produce Endpoints (`/api/produce`)
-
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| `GET` | `/api/produce` | Public | Query produce with filters (`?search=`, `?category=`, `?location=`, `?min_price=`, `?max_price=`, `?page=`, `?limit=`) |
-| `GET` | `/api/produce/<id>` | Public | Get single produce item details |
-| `GET` | `/api/produce/stats` | Public | Aggregate marketplace inventory volume and listings count |
-| `POST` | `/api/produce` | Farmer only | Create new produce listing (attaches farmer identity from JWT) |
-| `PUT` | `/api/produce/<id>` | Farmer only | Update listing (ownership verified) |
-| `DELETE` | `/api/produce/<id>` | Farmer only | Delete listing (ownership verified) |
-
-### Orders Endpoints (`/api/orders`)
-
-| Method | Endpoint | Access | Description |
-|---|---|---|---|
-| `GET` | `/api/orders` | Authenticated | List orders scoped to caller (buyer sees own; farmer sees their produce) |
-| `GET` | `/api/orders/<id>` | Buyer or Farmer | Get single order detail (ownership verified) |
-| `POST` | `/api/orders` | Buyer only | Place purchase order (atomic stock decrement, server price computation) |
-| `PATCH` | `/api/orders/<id>/status` | Buyer or Farmer | Update fulfillment status. Farmer: Pending -> Confirmed -> Dispatched -> Delivered. Buyer can cancel Pending orders. Stock restored on cancellation. |
-
----
-
-## 🧪 Running Automated Tests
-
-Run the test suite using pytest inside the `backend/` virtual environment:
-
+Run the automated test suite locally:
 ```bash
 cd backend
 pytest tests/ -v
 ```
 
-Tests cover:
-- Authentication enforcement (401 on missing tokens)
-- Role authorization (403 on role mismatch)
-- Farmer listing isolation (cannot modify another farmer's crop)
-- Server-side order total price calculation
-- Out-of-stock and insufficient stock rejection
-- Order status state-machine transitions and cancellation stock recovery
-- Centralized payload validation
-
----
-
-## 🚢 Deployment
-
-### Backend Deployment (Render / Railway)
-- Use the included [`render.yaml`](render.yaml) or [`Procfile`](Procfile).
-- Set Environment Variables: `SUPABASE_URL`, `SUPABASE_KEY`, `CORS_ORIGINS`, `DEBUG=false`.
-- Start Command: `gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 4`
-
-### Frontend Deployment (Netlify / Vercel / GitHub Pages)
-- Deploy root directory as static assets.
-- Configure `config.js` to point `apiBaseUrl` to your deployed backend URL.
-
----
-
-## 📁 Repository Structure
-
-```text
-AgriMandi/
-├── index.html              # Homepage / Landing page
-├── buyer-dashboard.html    # Buyer marketplace with search, filters & purchase modal
-├── farmer-dashboard.html   # Farmer management portal with listings & orders tabs
-├── login.html              # User login page
-├── register.html           # User registration page
-├── order-success.html      # Verified order confirmation page
-├── app.js                  # Frontend application logic & UI bindings
-├── api.js                  # Centralized REST API fetch dispatcher with JWT handling
-├── supabaseClient.js       # Supabase Auth client & storage image upload helpers
-├── config.example.js       # Frontend configuration template
-├── style.css               # Unified responsive stylesheet
-├── Procfile                # Heroku / Render process file
-├── render.yaml             # Render infrastructure blueprint
-├── LICENSE                 # MIT License
-├── docs/                   # Architecture documentation & screenshots
-│   └── architecture.md
-├── .github/workflows/      # Automated CI test workflows
-│   └── test.yml
-└── backend/                # Flask REST API service
-    ├── app.py              # Application factory (create_app), CORS, error handlers
-    ├── wsgi.py             # WSGI entrypoint for Gunicorn
-    ├── config.py           # Configuration loader
-    ├── auth.py             # @require_auth & @require_role decorators
-    ├── validation.py       # Input validation & state transitions
-    ├── db.py               # Supabase client adapter & in-memory store
-    ├── schema.sql          # Supabase SQL schema & RLS policies
-    ├── migration.sql       # v1 to v2 database migration script
-    ├── seed.sql            # Demo produce seeding script
-    ├── requirements.txt    # Pinned Python dependencies
-    ├── .env.example        # Environment variables template
-    ├── routes/
-    │   ├── __init__.py
-    │   ├── produce.py      # /api/produce routes
-    │   └── orders.py       # /api/orders routes
-    └── tests/
-        ├── conftest.py     # Pytest fixtures & memory DB state isolation
-        └── test_api.py     # Comprehensive test suite
+Run code style & quality check:
+```bash
+ruff check backend/
 ```
 
+The test suite contains 26 comprehensive tests covering:
+- Role-based authorization & ownership enforcement
+- Concurrency & inventory safety during order placement
+- State transition validation (Pending -> Confirmed -> Dispatched -> Delivered)
+- Server-side price calculation integrity
+- Production startup safeguards and fail-fast environment checks
+- Structured JSON logging and stack trace leakage prevention
+
 ---
 
-## ⚠️ Known Limitations
+## 🛠️ Troubleshooting Guide
 
-1. **Direct Purchase Model**: Currently purchases are placed per crop item. A multi-vendor unified cart is not implemented in this version.
-2. **Payment Processing**: Orders use a direct invoice/Cash-on-Delivery confirmation model; third-party payment gateway integration (Razorpay/Stripe) is scheduled for a future release.
-3. **Email Notifications**: Order status updates are tracked within the dashboard; external transactional email delivery (SMTP/Resend) requires additional webhook configuration.
+### 1. CORS Error: `Access to fetch at ... has been blocked by CORS policy`
+- **Cause**: The frontend origin making requests is not listed in the backend's `CORS_ORIGINS` variable.
+- **Fix**:
+  1. Note the exact protocol and hostname of your frontend (e.g. `https://my-site.netlify.app`, no trailing slash).
+  2. Open your Render Dashboard -> Service Settings -> Environment Variables.
+  3. Update `CORS_ORIGINS` to include your frontend URL:
+     ```
+     CORS_ORIGINS=https://my-site.netlify.app,http://localhost:5500
+     ```
+  4. Wait for Render to redeploy.
+
+### 2. Auth Redirect Loop or Session Lost after Email Confirmation / Password Reset
+- **Cause**: Supabase Auth redirect URLs are missing your production domain in the allow list.
+- **Fix**:
+  1. In Supabase Dashboard, go to **Authentication -> URL Configuration**.
+  2. Ensure your Netlify URL is in the **Redirect URLs** list:
+     ```
+     https://<your-site>.netlify.app/**
+     ```
+  3. Ensure your Site URL is set to `https://<your-site>.netlify.app`.
+
+### 3. Missing `config.js` or 404 in Browser Console
+- **Cause**: `config.js` is deliberately excluded from git via `.gitignore` to prevent secret leakage.
+- **Fix**:
+  - **On Netlify/Vercel**: Ensure your build command is set to `node scripts/build-config.js` and you configured `API_BASE_URL`, `SUPABASE_URL`, and `SUPABASE_ANON_KEY` in platform environment variables.
+  - **Locally**: Run `cp config.example.js config.js` and fill in your local API / Supabase values.
+
+### 4. Startup Error: `USE_MEMORY_DB cannot be enabled in production environments`
+- **Cause**: `USE_MEMORY_DB` is set to `true` while `ENVIRONMENT=production` or running on Render.
+- **Fix**: In production, in-memory storage is prohibited for data durability. Set `USE_MEMORY_DB=false` and provide valid `SUPABASE_URL` and `SUPABASE_KEY` values in your production environment.
+
+### 5. API Returns 503 Service Unavailable on `/api/health`
+- **Cause**: The backend is running in live database mode (`USE_MEMORY_DB=false`) but cannot establish a network connection to Supabase PostgreSQL.
+- **Fix**:
+  1. Verify `SUPABASE_URL` begins with `https://` and has no trailing slash.
+  2. Verify `SUPABASE_KEY` is your active project key from Supabase Dashboard -> Project Settings -> API.
+  3. Check the Supabase project status to ensure the database instance is not paused.
 
 ---
 
-## 👨‍💻 Author
+## 📄 License
 
-- **Atharva Chavan** ([@Atharva356](https://github.com/Atharva356))
-- Aryan Nerkar
-- Krushna Mistari(@krushnagajananmistari)
-- Gaurav Patil(@Gauravpatil25)
+This project is licensed under the MIT License — see the [`LICENSE`](LICENSE) file for details.
