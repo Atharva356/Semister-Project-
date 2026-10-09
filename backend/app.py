@@ -22,16 +22,13 @@ logger = logging.getLogger("agrimandi.app")
 
 def create_app(config_class=Config) -> Flask:
     """Application factory for AgriMandi Flask backend."""
-    import os
-    is_production = (
-        os.environ.get("FLASK_ENV", "").lower() == "production"
-        or "RENDER" in os.environ
-    )
-    if getattr(config_class, "USE_MEMORY_DB", False) and is_production:
-        raise RuntimeError("USE_MEMORY_DB cannot be enabled in production environments")
+    # Fail-fast validation of required environment variables
+    if hasattr(config_class, "validate"):
+        config_class.validate()
 
     app = Flask(__name__)
     app.config.from_object(config_class)
+    app.config["SECRET_KEY"] = getattr(config_class, "SECRET_KEY", "agrimandi-dev-secret-key-change-in-prod")
 
     # Restrict CORS to configured origins
     origins = config_class.CORS_ORIGINS
