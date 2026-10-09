@@ -292,6 +292,27 @@ function initAuthForms() {
         return;
       }
 
+      // If email confirmation is enabled in Supabase, session will be null
+      if (result.user && !result.session) {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.textContent = "Create My Account";
+        }
+        showToast("Account created! Please check your email to confirm your account.", "info");
+        const form = document.getElementById("registerForm");
+        if (form) {
+          form.innerHTML = `
+            <div style="padding: 1.5rem; text-align: center; border-radius: 8px; background-color: #d1e7dd; color: #0f5132; border: 1px solid #badbcc; margin-bottom: 1.5rem;">
+              <h3 style="margin-top: 0; font-size: 1.25rem;">📧 Confirmation Email Sent!</h3>
+              <p style="margin-bottom: 0.75rem;">We've sent an activation link to <strong>${escapeHtml(email)}</strong>.</p>
+              <p style="font-size: 0.9rem; color: #146c43; margin-bottom: 1.25rem;">Please check your inbox (and spam folder) and click the link to activate your AgriMandi account.</p>
+              <a href="login.html" class="btn btn-primary" style="display: inline-block;">Go to Sign In</a>
+            </div>
+          `;
+        }
+        return;
+      }
+
       showToast("Account created successfully! Redirecting...");
 
       setTimeout(() => {

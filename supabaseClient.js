@@ -59,10 +59,12 @@ async function supabaseSignUp(email, password, { name, role, location }) {
   }
 
   try {
+    const redirectUrl = window.location.origin + "/login.html";
     const { data, error } = await _agriSupabaseClient.auth.signUp({
       email: email,
       password: password,
       options: {
+        emailRedirectTo: redirectUrl,
         data: {
           name: name,
           full_name: name,
@@ -77,6 +79,55 @@ async function supabaseSignUp(email, password, { name, role, location }) {
   } catch (err) {
     console.error("Supabase signup error:", err);
     return { user: null, session: null, error: err };
+  }
+}
+
+/**
+ * Send password reset email link
+ */
+async function supabaseResetPasswordForEmail(email, redirectUrl) {
+  if (!_agriSupabaseClient) {
+    return {
+      data: null,
+      error: new Error("Supabase client is not connected. Please check configuration.")
+    };
+  }
+
+  try {
+    const targetRedirect = redirectUrl || (window.location.origin + "/reset-password.html");
+    const { data, error } = await _agriSupabaseClient.auth.resetPasswordForEmail(email, {
+      redirectTo: targetRedirect
+    });
+
+    if (error) throw error;
+    return { data, error: null };
+  } catch (err) {
+    console.error("Supabase password reset error:", err);
+    return { data: null, error: err };
+  }
+}
+
+/**
+ * Update authenticated user's password (used in password recovery flow)
+ */
+async function supabaseUpdatePassword(newPassword) {
+  if (!_agriSupabaseClient) {
+    return {
+      user: null,
+      error: new Error("Supabase client is not connected.")
+    };
+  }
+
+  try {
+    const { data, error } = await _agriSupabaseClient.auth.updateUser({
+      password: newPassword
+    });
+
+    if (error) throw error;
+    return { user: data.user, error: null };
+  } catch (err) {
+    console.error("Supabase password update error:", err);
+    return { user: null, error: err };
   }
 }
 
@@ -248,6 +299,8 @@ window.agriMandiSupabase = {
   signUp: supabaseSignUp,
   signIn: supabaseSignIn,
   signOut: supabaseSignOut,
+  resetPasswordForEmail: supabaseResetPasswordForEmail,
+  updatePassword: supabaseUpdatePassword,
   getAccessToken: supabaseGetAccessToken,
   getCurrentUser: supabaseGetCurrentUser,
   uploadProduceImage: supabaseUploadProduceImage
