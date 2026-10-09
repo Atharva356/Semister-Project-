@@ -255,11 +255,16 @@ class Database:
 
                 if search:
                     s = search.strip()
-                    # Search across name, location, and farmer_name
-                    query = query.or_(f"name.ilike.%{s}%,location.ilike.%{s}%,farmer_name.ilike.%{s}%")
-
-                query = query.order("created_at", desc=True).range(offset, offset + limit - 1)
-                response = query.execute()
+                    try:
+                        search_query = query.or_(f"name.ilike.%{s}%,location.ilike.%{s}%,farmer_name.ilike.%{s}%")
+                        response = search_query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+                    except Exception as search_err:
+                        if "farmer_name" in str(search_err) or "42703" in str(search_err):
+                            response = query.or_(f"name.ilike.%{s}%,location.ilike.%{s}%,farmerName.ilike.%{s}%").order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+                        else:
+                            raise search_err
+                else:
+                    response = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
 
                 items = [serialize_produce(item) for item in (response.data or [])]
                 total_count = response.count if response.count is not None else len(items)
@@ -339,7 +344,19 @@ class Database:
         if Config.is_supabase_configured():
             try:
                 client = self.get_client(token)
-                response = client.table("produce").insert(new_item).execute()
+                try:
+                    response = client.table("produce").insert(new_item).execute()
+                except Exception as insert_err:
+                    err_str = str(insert_err)
+                    if "date_added" in err_str or "farmer_name" in err_str or "PGRST204" in err_str or "42703" in err_str:
+                        # Fallback for schemas with legacy columns (dateAdded / farmerName)
+                        legacy_item = dict(new_item)
+                        legacy_item["dateAdded"] = legacy_item.pop("date_added", None)
+                        legacy_item["farmerName"] = legacy_item.pop("farmer_name", None)
+                        response = client.table("produce").insert(legacy_item).execute()
+                    else:
+                        raise insert_err
+
                 if response.data:
                     return serialize_produce(response.data[0])
                 raise DatabaseError("Supabase insert returned no data")
@@ -437,16 +454,99 @@ class Database:
                     "p_buyer_email": buyer_email,
                     "p_delivery_address": delivery_address
                 }
-                response = client.rpc("place_order", rpc_params).execute()
-                if response.data:
-                    # In Postgres RPC, data could be the row or a single result
-                    order_row = response.data
-                    if isinstance(order_row, list) and len(order_row) > 0:
-                        order_row = order_row[0]
-                    return serialize_order(order_row)
-                raise DatabaseError("place_order RPC returned no data")
+                try:
+                    response = client.rpc("place_order", rpc_params).execute()
+                    if response.data:
+                        order_row = response.data
+                        if isinstance(order_row, list) and len(order_row) > 0:
+                            order_row = order_row[0]
+                        return serialize_order(order_row)
+                    raise DatabaseError("place_order RPC returned no data")
+                except Exception as rpc_err:
+                    err_str = str(rpc_err)
+                    if "PGRST202" in err_str or "place_order" in err_str:
+                        logger.warning("place_order stored procedure not found in Supabase (PGRST202). Falling back to direct table operations.")
+                        # Direct table operations fallback
+                        prod_res = client.table("produce").select("*").eq("id", produce_id).execute()
+                        if not prod_res.data:
+                            raise ValueError(f"Produce with ID '{produce_id}' not found")
+                        prod_item = prod_res.data[0]
+                        available_stock = float(prod_item.get("quantity", 0))
+                        if available_stock < quantity:
+                            raise ValueError(f"Insufficient stock. Available: {available_stock}, Requested: {quantity}")
+
+                        unit_price = float(prod_item["price"])
+                        total_price = round(unit_price * quantity, 2)
+                        new_stock = round(available_stock - quantity, 2)
+
+                        # Decrement stock in produce table
+                        client.table("produce").update({"quantity": new_stock}).eq("id", produce_id).execute()
+
+                        random_suffix = uuid.uuid4().hex[:6].upper()
+                        order_code = f"AGRI-{random_suffix}"
+                        order_date_str = datetime.date.today().strftime("%d %b %Y")
+                        f_name = prod_item.get("farmer_name") or prod_item.get("farmerName") or "Verified Grower"
+                        f_loc = prod_item.get("location") or "India"
+                        f_id = prod_item.get("farmer_id") or prod_item.get("farmerId")
+
+                        order_payload = {
+                            "order_id": order_code,
+                            "order_date": order_date_str,
+                            "produce_id": produce_id,
+                            "produce_name": prod_item["name"],
+                            "category": prod_item.get("category"),
+                            "quantity": quantity,
+                            "unit": prod_item.get("unit", "Kg"),
+                            "unit_price": unit_price,
+                            "total_price": total_price,
+                            "farmer_name": f_name,
+                            "farmer_location": f_loc,
+                            "buyer_id": buyer_id,
+                            "buyer_name": buyer_name,
+                            "buyer_email": buyer_email,
+                            "delivery_address": delivery_address,
+                            "estimated_delivery": "3-5 Business Days",
+                            "status": "Confirmed"
+                        }
+                        if f_id:
+                            order_payload["farmer_id"] = f_id
+
+                        try:
+                            order_res = client.table("orders").insert(order_payload).execute()
+                        except Exception as ins_err:
+                            if "PGRST204" in str(ins_err) or "column" in str(ins_err) or "42703" in str(ins_err):
+                                # Fallback to legacy camelCase columns
+                                legacy_payload = {
+                                    "orderId": order_code,
+                                    "orderDate": order_date_str,
+                                    "produceName": prod_item["name"],
+                                    "category": prod_item.get("category"),
+                                    "quantity": quantity,
+                                    "unit": prod_item.get("unit", "Kg"),
+                                    "unitPrice": unit_price,
+                                    "totalPrice": total_price,
+                                    "farmerName": f_name,
+                                    "farmerLocation": f_loc,
+                                    "buyer_id": buyer_id,
+                                    "buyerName": buyer_name,
+                                    "buyerEmail": buyer_email,
+                                    "deliveryAddress": delivery_address,
+                                    "estimatedDelivery": "3-5 Business Days",
+                                    "status": "Confirmed"
+                                }
+                                order_res = client.table("orders").insert(legacy_payload).execute()
+                            else:
+                                raise ins_err
+
+                        if order_res.data:
+                            return serialize_order(order_res.data[0])
+                        raise DatabaseError("Supabase orders insert returned no data")
+                    else:
+                        raise rpc_err
+            except (ValueError, DatabaseError):
+                raise
             except Exception as e:
-                logger.error(f"Supabase place_order RPC failed: {e}", exc_info=True)
+                logger.error(f"Supabase place_order failed: {e}", exc_info=True)
                 raise DatabaseError(str(e))
 
         # ----------------------------------------------------------------------
@@ -513,13 +613,30 @@ class Database:
                 query = client.table("orders").select("*").order("created_at", desc=True)
                 if role == "buyer":
                     query = query.eq("buyer_id", user_id)
+                    response = query.execute()
+                    return [serialize_order(row) for row in (response.data or [])]
                 elif role == "farmer":
-                    query = query.eq("farmer_id", user_id)
+                    try:
+                        query = query.eq("farmer_id", user_id)
+                        response = query.execute()
+                        return [serialize_order(row) for row in (response.data or [])]
+                    except Exception as f_err:
+                        err_str = str(f_err)
+                        if "farmer_id" in err_str or "42703" in err_str or "PGRST204" in err_str:
+                            # In legacy schemas without farmer_id on orders, match by farmer's profile full_name
+                            try:
+                                prof_res = client.table("profiles").select("full_name").eq("id", user_id).execute()
+                                fname = prof_res.data[0].get("full_name") if prof_res.data else None
+                                if fname:
+                                    legacy_q = client.table("orders").select("*").eq("farmerName", fname).order("created_at", desc=True)
+                                    response = legacy_q.execute()
+                                    return [serialize_order(row) for row in (response.data or [])]
+                            except Exception:
+                                pass
+                            return []
+                        raise f_err
                 else:
                     return []
-
-                response = query.execute()
-                return [serialize_order(row) for row in (response.data or [])]
             except Exception as e:
                 logger.error(f"Failed to query orders for user {user_id}: {e}", exc_info=True)
                 raise DatabaseError(f"Database error fetching orders: {e}")
