@@ -1,19 +1,51 @@
+# ==============================================================================
+# AgriMandi Flask Backend - Render Deployment Specification
+# ==============================================================================
+# Blueprint for deploying the AgriMandi REST API service to Render.
+# Documentation: https://render.com/docs/blueprint-spec
+# ==============================================================================
+
 services:
   - type: web
     name: agrimandi-backend
-    env: python
-    buildCommand: cd backend && pip install -r requirements.txt
-    startCommand: cd backend && gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 4
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: cd backend && pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: cd backend && gunicorn wsgi:app --bind 0.0.0.0:$PORT --workers 4 --threads 2 --timeout 120
+    healthCheckPath: /api/health
+
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.8
+
+      - key: FLASK_ENV
+        value: production
+
+      - key: ENVIRONMENT
+        value: production
+
       - key: DEBUG
         value: "false"
+
       - key: USE_MEMORY_DB
         value: "false"
+
+      - key: SECRET_KEY
+        generateValue: true
+
+      # Set this to your frontend URL (e.g. https://your-site.netlify.app)
       - key: CORS_ORIGINS
-        value: "*"
+        sync: false
+
+      # Supabase Project URL from Project Settings -> API
       - key: SUPABASE_URL
         sync: false
+
+      # Supabase Anon or Service Role key
       - key: SUPABASE_KEY
+        sync: false
+
+      # (Optional) Supabase JWT Secret
+      - key: SUPABASE_JWT_SECRET
         sync: false

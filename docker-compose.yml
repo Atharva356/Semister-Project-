@@ -1,0 +1,51 @@
+# ==============================================================================
+# AgriMandi Local Development - Docker Compose
+# ==============================================================================
+# Usage:
+#   docker compose up --build
+#
+# Services:
+#   - backend:  Flask REST API on http://localhost:5000
+#   - frontend: Nginx static web server on http://localhost:8080
+# ==============================================================================
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agrimandi-backend
+    ports:
+      - "5000:5000"
+    environment:
+      - PORT=5000
+      - HOST=0.0.0.0
+      - DEBUG=true
+      - ENVIRONMENT=development
+      # Default to true for zero-setup local dev; set to false in .env when testing with live Supabase
+      - USE_MEMORY_DB=${USE_MEMORY_DB:-true}
+      - SUPABASE_URL=${SUPABASE_URL:-}
+      - SUPABASE_KEY=${SUPABASE_KEY:-}
+      - SECRET_KEY=${SECRET_KEY:-agrimandi-dev-secret-key-change-in-prod}
+      - CORS_ORIGINS=http://localhost:8080,http://localhost:5500,http://127.0.0.1:5500,http://localhost:3000
+    volumes:
+      - ./backend:/app
+    # Run directly with Flask dev server for hot reload during local dev
+    command: ["python", "app.py"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    image: nginx:alpine
+    container_name: agrimandi-frontend
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./:/usr/share/nginx/html:ro
+      - ./nginx-dev.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
