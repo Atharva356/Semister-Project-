@@ -29,3 +29,10 @@ This folder contains numbered, idempotent SQL scripts to provision and configure
 6. Go to **Authentication -> URL Configuration** and add your frontend URLs to the Redirect URLs list.
 7. Go to your frontend, register a new account choosing role **Farmer**.
 8. Return to the SQL Editor, paste `06_seed_catalog.sql`, and click **Run** to populate the demo produce for your farmer.
+
+---
+
+## Database Backups & Index Review Documentation
+For backup instructions (`pg_dump` commands, restoration procedures) and an in-depth review of every database index and the query patterns it serves, see:
+- [`docs/database_backup_and_indexes.md`](file:///c:/Users/athar/OneDrive/Desktop/AgriMandi/docs/database_backup_and_indexes.md)
+

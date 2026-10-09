@@ -266,6 +266,15 @@ The test suite contains 26 comprehensive tests covering:
 
 ---
 
+## 💾 Database Backups & Index Review
+
+Detailed operational and architectural documentation:
+- **[Database Backup & Disaster Recovery Guide](docs/database_backup_and_indexes.md#part-1-database-backup-strategy)**: Native Supabase backups, on-demand `pg_dump` commands, and restoration walkthrough.
+- **[Database Index Review & Query Patterns](docs/database_backup_and_indexes.md#part-2-database-index-review--query-patterns)**: Detailed breakdown explaining each index and the exact query patterns accelerated for farmers and buyers.
+- **[Supabase Auth Configuration Guide](docs/supabase_auth_guide.md)**: Email confirmation and password recovery flows.
+
+---
+
 ## 📄 License
 
 This project is licensed under the MIT License — see the [`LICENSE`](LICENSE) file for details.
