@@ -9,3 +9,7 @@ ignore = [
     "E501",  # line length violations
     "E402",  # module level import not at top of file (used conditionally for test fixtures/env)
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]

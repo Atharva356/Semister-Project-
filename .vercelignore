@@ -1,0 +1,11 @@
+# Vercel Ignore File
+# Exclude Python backend and local dev caches from Vercel static frontend deployment.
+# AgriMandi backend is deployed separately on Render (or Docker).
+
+backend/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.coverage
