@@ -1,0 +1,25 @@
+# Git & IDE
+.git/
+.gitignore
+.vscode/
+.idea/
+
+# Node
+node_modules/
+backend/node_modules/
+
+# Python virtualenvs & cache
+.venv/
+backend/.venv/
+venv/
+__pycache__/
+backend/__pycache__/
+*.py[cod]
+.pytest_cache/
+backend/.pytest_cache/
+.ruff_cache/
+backend/.ruff_cache/
+
+# Local env secrets
+.env
+backend/.env
