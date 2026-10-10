@@ -37,12 +37,18 @@ class Config:
     # Explicit in-memory database flag (default False)
     USE_MEMORY_DB = os.environ.get("USE_MEMORY_DB", "False").lower() in ("true", "1", "yes")
 
-    # Allowed CORS origins (comma-separated string)
+    # Allowed CORS origins (comma-separated string + auto-allowed patterns)
     raw_cors = os.environ.get(
         "CORS_ORIGINS",
         "http://localhost:5500,http://127.0.0.1:5500,http://localhost:5000,http://127.0.0.1:5000,http://localhost:3000,http://127.0.0.1:3000"
     )
-    CORS_ORIGINS = [orig.strip() for orig in raw_cors.split(",") if orig.strip()]
+    user_origins = [orig.strip() for orig in raw_cors.split(",") if orig.strip()]
+    AUTO_PATTERNS = [
+        r"^https:\/\/.*\.vercel\.app$",
+        r"^https:\/\/.*\.netlify\.app$",
+        r"^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$",
+    ]
+    CORS_ORIGINS = list(dict.fromkeys(user_origins + AUTO_PATTERNS))
 
     @classmethod
     def is_supabase_configured(cls) -> bool:
