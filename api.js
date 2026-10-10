@@ -11,7 +11,21 @@
 
 (function () {
   const getBaseUrl = () => {
-    return (window.AGRIMANDI_CONFIG && window.AGRIMANDI_CONFIG.apiBaseUrl) || "http://localhost:5000";
+    let raw = (window.AGRIMANDI_CONFIG && window.AGRIMANDI_CONFIG.apiBaseUrl) || "http://localhost:5000";
+    if (typeof raw === "string") {
+      raw = raw.trim();
+      // Extract URL if placeholder or example text was accidentally entered
+      const match = raw.match(/https?:\/\/[^\s),"]+/i);
+      if (match) {
+        return match[0].replace(/\/+$/, '');
+      }
+      if (!raw.startsWith("http://") && !raw.startsWith("https://") && !raw.startsWith("/")) {
+        console.error("[AgriMandi] Invalid API_BASE_URL configured:", raw);
+        return "http://localhost:5000";
+      }
+      return raw.replace(/\/+$/, '');
+    }
+    return "http://localhost:5000";
   };
 
   /**

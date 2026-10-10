@@ -15,16 +15,31 @@ const path = require('path');
 const rootTargetPath = path.resolve(__dirname, '..', '..', 'config.js');
 const localTargetPath = path.resolve(__dirname, '..', 'config.js');
 
-const apiBaseUrl = (
-  process.env.API_BASE_URL ||
-  process.env.AGRIMANDI_API_BASE_URL ||
-  'http://localhost:5000'
-).trim();
+function cleanUrl(raw, fallback) {
+  if (!raw) return fallback;
+  let val = raw.trim();
+  const urlMatch = val.match(/https?:\/\/[^\s),"]+/i);
+  if (urlMatch) {
+    if (val !== urlMatch[0]) {
+      console.warn(`⚠️  [AgriMandi] Placeholder text detected in URL ("${val}"). Extracted: "${urlMatch[0]}"`);
+    }
+    val = urlMatch[0];
+  } else if (!val.startsWith('http://') && !val.startsWith('https://')) {
+    console.warn(`⚠️  [AgriMandi] Value "${val}" is not a valid URL. Falling back to "${fallback}".`);
+    return fallback;
+  }
+  return val.replace(/\/+$/, '');
+}
 
-const supabaseUrl = (
-  process.env.SUPABASE_URL ||
+const apiBaseUrl = cleanUrl(
+  process.env.API_BASE_URL || process.env.AGRIMANDI_API_BASE_URL,
+  'http://localhost:5000'
+);
+
+const supabaseUrl = cleanUrl(
+  process.env.SUPABASE_URL,
   'https://your-project-id.supabase.co'
-).trim();
+);
 
 const supabaseAnonKey = (
   process.env.SUPABASE_ANON_KEY ||
