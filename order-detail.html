@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Order Confirmed — AgriMandi</title>
-  <meta name="description" content="Your direct farm order has been successfully placed on AgriMandi." />
+  <title>Order Details & Status — AgriMandi</title>
+  <meta name="description" content="Track your order status step-by-step from harvest confirmation to delivery." />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="has-mobile-nav">
@@ -59,45 +59,46 @@
 
   <!-- Main Content -->
   <main class="main-content">
-    <div class="container">
+    <div class="container" style="max-width: 860px;">
       
-      <div class="success-wrapper">
-        <div class="success-card">
-          <div class="success-icon-wrapper">
-            ✓
-          </div>
+      <!-- Back Navigation Bar -->
+      <div style="margin-bottom: 20px;">
+        <a href="orders.html" class="btn btn-outline btn-sm">
+          ← Back to My Orders
+        </a>
+      </div>
 
-          <h1 class="success-title">Order Placed Successfully!</h1>
-          <p class="success-subtitle">
-            Thank you for supporting local growers directly. Your order has been notified to the farmer for confirmation and dispatch.
-          </p>
-
-          <!-- Prominent Order Code Display -->
-          <div id="successOrderCodeBadge" style="display: inline-block; margin-bottom: 20px; padding: 8px 18px; background: var(--primary-light); color: var(--primary); font-weight: 800; font-size: 1.15rem; border-radius: var(--radius-full); border: 1px solid var(--primary-subtle);">
-            Order #AGRI-...
-          </div>
-
-          <!-- Dynamic Order Summary Details -->
-          <div class="order-summary-box" id="orderSummaryDetails">
-            <!-- Rendered by app.js -->
-          </div>
-
-          <div class="success-actions" style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 24px;">
-            <a href="order-detail.html" id="trackOrderActionBtn" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px;">
-              📦 Track Order
-            </a>
-            <a href="buyer-dashboard.html" class="btn btn-outline">
-              🛒 Continue Shopping
-            </a>
-            <a href="orders.html" class="btn btn-outline">
-              📋 View All Orders
-            </a>
-          </div>
-        </div>
+      <!-- Order Detail Container (populated dynamically by app.js) -->
+      <div id="orderDetailContainer">
+        <div class="loading-spinner"></div>
       </div>
 
     </div>
   </main>
+
+  <!-- Reusable Action Confirmation Modal ("Are you sure?") -->
+  <div class="modal-overlay" id="confirmActionModal">
+    <div class="modal-content" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3 id="confirmModalTitle">⚠️ Confirmation</h3>
+        <button type="button" class="modal-close-btn" id="closeConfirmModal" aria-label="Close dialog">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="confirmModalMessage" style="font-size: 1rem; color: var(--text-main); margin-bottom: 14px;">
+          Are you sure you want to proceed?
+        </p>
+        <div id="confirmModalInputGroup" style="display: none; margin-top: 10px;">
+          <label for="confirmModalReason" class="form-label" style="font-size: 0.85rem;">Reason *</label>
+          <textarea id="confirmModalReason" class="form-control" rows="2" placeholder="Enter reason..."></textarea>
+          <small id="confirmModalReasonError" class="error-message" style="display: none;">Reason is required.</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline btn-sm" id="cancelConfirmModalBtn">Cancel</button>
+        <button type="button" class="btn btn-danger btn-sm" id="executeConfirmModalBtn">Yes, Confirm</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Mobile Bottom Navigation -->
   <nav class="mobile-bottom-nav">
@@ -111,7 +112,7 @@
         <span>Cart</span>
         <span class="mobile-nav-badge" id="mobileNavCartBadge" style="display: none;">0</span>
       </a>
-      <a href="orders.html" class="mobile-nav-link">
+      <a href="orders.html" class="mobile-nav-link active">
         <span class="mobile-nav-icon">📋</span>
         <span>Orders</span>
       </a>

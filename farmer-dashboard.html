@@ -26,6 +26,25 @@
       </nav>
 
       <div class="nav-auth-buttons">
+        <!-- Notification Bell -->
+        <div class="nav-notif-container" id="navNotifContainer">
+          <button type="button" class="nav-bell-btn" id="navBellBtn" aria-label="Notifications" title="Notifications">
+            🔔
+            <span class="bell-badge" id="navBellBadge" style="display: none;">0</span>
+          </button>
+          <div class="notif-dropdown" id="notifDropdown">
+            <div class="notif-header">
+              <h4>Notifications</h4>
+              <button type="button" class="notif-mark-read-btn" id="notifMarkAllReadBtn">Mark all as read</button>
+            </div>
+            <ul class="notif-list" id="notifList">
+              <li style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">
+                No notifications yet.
+              </li>
+            </ul>
+          </div>
+        </div>
+
         <span id="navUserBadge" class="badge badge-earth" style="display: none;"></span>
         <a href="login.html" class="btn btn-outline btn-sm" id="navLoginBtn">Login</a>
       </div>
@@ -89,8 +108,10 @@
         <button type="button" class="btn btn-primary btn-sm" id="tabListingsBtn" style="border-radius: var(--radius-sm) var(--radius-sm) 0 0;">
           🌾 My Harvest Listings
         </button>
-        <button type="button" class="btn btn-outline btn-sm" id="tabOrdersBtn" style="border-radius: var(--radius-sm) var(--radius-sm) 0 0;">
-          📋 Incoming Customer Orders <span id="ordersCountBadge" class="badge badge-green" style="margin-left: 6px;">0</span>
+        <button type="button" class="btn btn-outline btn-sm" id="tabOrdersBtn" style="border-radius: var(--radius-sm) var(--radius-sm) 0 0; display: inline-flex; align-items: center; gap: 6px;">
+          📋 Incoming Customer Orders 
+          <span id="ordersPendingBadge" class="badge badge-pending" style="display: none;">0 waiting</span>
+          <span id="ordersCountBadge" class="badge badge-green">0</span>
         </button>
       </div>
 
@@ -326,6 +347,30 @@
           <button type="submit" class="btn btn-primary btn-sm" id="saveEditBtn">Save Changes</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- Reusable Action Confirmation Modal ("Are you sure?") -->
+  <div class="modal-overlay" id="confirmActionModal">
+    <div class="modal-content" style="max-width: 440px;">
+      <div class="modal-header">
+        <h3 id="confirmModalTitle">⚠️ Confirmation</h3>
+        <button type="button" class="modal-close-btn" id="closeConfirmModal" aria-label="Close dialog">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p id="confirmModalMessage" style="font-size: 1rem; color: var(--text-main); margin-bottom: 14px;">
+          Are you sure you want to proceed?
+        </p>
+        <div id="confirmModalInputGroup" style="display: none; margin-top: 10px;">
+          <label for="confirmModalReason" class="form-label" style="font-size: 0.85rem;">Reason *</label>
+          <textarea id="confirmModalReason" class="form-control" rows="2" placeholder="Provide short reason for the buyer..."></textarea>
+          <small id="confirmModalReasonError" class="error-message" style="display: none;">Reason is required.</small>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline btn-sm" id="cancelConfirmModalBtn">Cancel</button>
+        <button type="button" class="btn btn-danger btn-sm" id="executeConfirmModalBtn">Yes, Confirm</button>
+      </div>
     </div>
   </div>
 

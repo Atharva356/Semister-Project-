@@ -158,7 +158,28 @@ def serialize_order(order: Dict[str, Any]) -> Dict[str, Any]:
         "deliveryAddress": order.get("delivery_address") or order.get("deliveryAddress"),
         "estimatedDelivery": order.get("estimated_delivery") or order.get("estimatedDelivery"),
         "status": order.get("status"),
+        "confirmedAt": str(order.get("confirmed_at") or order.get("confirmedAt") or ""),
+        "dispatchedAt": str(order.get("dispatched_at") or order.get("dispatchedAt") or ""),
+        "deliveredAt": str(order.get("delivered_at") or order.get("deliveredAt") or ""),
+        "cancelledAt": str(order.get("cancelled_at") or order.get("cancelledAt") or ""),
+        "rejectedAt": str(order.get("rejected_at") or order.get("rejectedAt") or ""),
+        "rejectionReason": order.get("rejection_reason") or order.get("rejectionReason") or "",
         "createdAt": str(order.get("created_at") or "")
+    }
+
+
+def serialize_notification(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Converts notification DB record (snake_case) to client JSON schema (camelCase)."""
+    if not item:
+        return {}
+    return {
+        "id": str(item.get("id", "")),
+        "userId": str(item.get("user_id") or item.get("userId") or ""),
+        "title": item.get("title", ""),
+        "message": item.get("message", ""),
+        "orderId": item.get("order_id") or item.get("orderId"),
+        "isRead": bool(item.get("is_read") if item.get("is_read") is not None else item.get("isRead", False)),
+        "createdAt": str(item.get("created_at") or item.get("createdAt") or "")
     }
 
 
@@ -176,6 +197,7 @@ class Database:
         self._profiles_store: Dict[str, Dict[str, Any]] = {p["id"]: dict(p) for p in INITIAL_PROFILES}
         self._produce_store: List[Dict[str, Any]] = [dict(item) for item in INITIAL_PRODUCE]
         self._orders_store: List[Dict[str, Any]] = []
+        self._notifications_store: List[Dict[str, Any]] = []
 
     def get_client(self, token: Optional[str] = None):
         """
@@ -544,7 +566,7 @@ class Database:
                             "buyer_email": buyer_email,
                             "delivery_address": delivery_address,
                             "estimated_delivery": "3-5 Business Days",
-                            "status": "Confirmed"
+                            "status": "Pending"
                         }
                         if f_id:
                             order_payload["farmer_id"] = f_id
@@ -570,14 +592,28 @@ class Database:
                                     "buyerEmail": buyer_email,
                                     "deliveryAddress": delivery_address,
                                     "estimatedDelivery": "3-5 Business Days",
-                                    "status": "Confirmed"
+                                    "status": "Pending"
                                 }
                                 order_res = client.table("orders").insert(legacy_payload).execute()
                             else:
                                 raise ins_err
 
                         if order_res.data:
-                            return serialize_order(order_res.data[0])
+                            created_order = order_res.data[0]
+                            # Create notification for farmer
+                            target_farmer_id = f_id or created_order.get("farmer_id")
+                            if target_farmer_id:
+                                try:
+                                    self.create_notification(
+                                        user_id=target_farmer_id,
+                                        title="New Order Received",
+                                        message=f"Order #{order_code} placed by {buyer_name} for {quantity} {prod_item.get('unit', 'Kg')} of {prod_item['name']}.",
+                                        order_id=order_code,
+                                        token=token
+                                    )
+                                except Exception:
+                                    pass
+                            return serialize_order(created_order)
                         raise DatabaseError("Supabase orders insert returned no data")
                     else:
                         raise rpc_err
@@ -630,11 +666,20 @@ class Database:
             "buyer_email": buyer_email,
             "delivery_address": delivery_address,
             "estimated_delivery": "3-5 Business Days",
-            "status": "Confirmed",
+            "status": "Pending",
             "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
         }
 
         self._orders_store.insert(0, order_record)
+
+        # Send notification to farmer
+        self.create_notification(
+            user_id=order_record["farmer_id"],
+            title="New Order Received",
+            message=f"Order #{order_record['order_id']} placed by {buyer_name} for {quantity} {order_record['unit']} of {order_record['produce_name']}.",
+            order_id=order_record["order_id"]
+        )
+
         return serialize_order(order_record)
 
     def get_orders_for_user(
@@ -713,9 +758,9 @@ class Database:
         return None
 
     def update_order_status(
-        self, order_id: str, new_status: str, token: Optional[str] = None
+        self, order_id: str, new_status: str, reason: Optional[str] = None, token: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        """Updates status of order and restores stock if transitioning to Cancelled."""
+        """Updates status of order, manages timestamp tracking, rejection reasons, stock restoration, and notifications."""
         target_order = self.get_order_by_id(order_id, token)
         if not target_order:
             return None
@@ -723,46 +768,320 @@ class Database:
         produce_id = target_order.get("produce_id")
         order_qty = float(target_order.get("quantity", 0))
         previous_status = target_order.get("status")
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        buyer_id = str(target_order.get("buyer_id") or target_order.get("buyerId") or "")
+        farmer_id = str(target_order.get("farmer_id") or target_order.get("farmerId") or "")
+        order_code = target_order.get("order_id") or order_id
+        crop_name = target_order.get("produce_name") or "produce"
 
         if Config.is_supabase_configured():
             try:
                 client = self.get_client(token)
+                order_key = "order_id" if target_order.get("order_id") == order_id else "id"
+
                 if new_status == "Cancelled":
-                    # Call cancel_order RPC (atomic cancellation, permission check, and stock restore)
-                    response = client.rpc("cancel_order", {"p_order_id": order_id}).execute()
-                    if response.data:
-                        order_row = response.data
-                        if isinstance(order_row, list) and len(order_row) > 0:
-                            order_row = order_row[0]
-                        return serialize_order(order_row)
-                    return None
+                    try:
+                        response = client.rpc("cancel_order", {"p_order_id": order_id}).execute()
+                        if response.data:
+                            order_row = response.data[0] if isinstance(response.data, list) else response.data
+                            updated_order = serialize_order(order_row)
+                        else:
+                            updated_order = None
+                    except Exception as cancel_rpc_err:
+                        logger.warning(f"cancel_order RPC failed: {cancel_rpc_err}. Falling back to direct update.")
+                        # Restore stock
+                        if produce_id:
+                            try:
+                                prod_res = client.table("produce").select("quantity").eq("id", produce_id).execute()
+                                if prod_res.data:
+                                    current_q = float(prod_res.data[0].get("quantity", 0))
+                                    client.table("produce").update({"quantity": current_q + order_qty}).eq("id", produce_id).execute()
+                            except Exception:
+                                pass
+                        up_res = client.table("orders").update({"status": "Cancelled", "cancelled_at": now_iso}).eq(order_key, order_id).execute()
+                        updated_order = serialize_order(up_res.data[0]) if up_res.data else None
+
+                    if updated_order and farmer_id:
+                        self.create_notification(
+                            user_id=farmer_id,
+                            title="Order Cancelled",
+                            message=f"Order #{order_code} was cancelled. Inventory of {crop_name} has been restored.",
+                            order_id=order_code,
+                            token=token
+                        )
+                    return updated_order
+
+                elif new_status == "Rejected":
+                    try:
+                        response = client.rpc("reject_order", {"p_order_id": order_id, "p_reason": reason or "Unable to fulfill"}).execute()
+                        if response.data:
+                            order_row = response.data[0] if isinstance(response.data, list) else response.data
+                            updated_order = serialize_order(order_row)
+                        else:
+                            updated_order = None
+                    except Exception as reject_rpc_err:
+                        logger.warning(f"reject_order RPC failed: {reject_rpc_err}. Falling back to direct update.")
+                        # Restore stock
+                        if produce_id:
+                            try:
+                                prod_res = client.table("produce").select("quantity").eq("id", produce_id).execute()
+                                if prod_res.data:
+                                    current_q = float(prod_res.data[0].get("quantity", 0))
+                                    client.table("produce").update({"quantity": current_q + order_qty}).eq("id", produce_id).execute()
+                            except Exception:
+                                pass
+                        up_res = client.table("orders").update({
+                            "status": "Rejected",
+                            "rejection_reason": reason or "Unable to fulfill",
+                            "rejected_at": now_iso
+                        }).eq(order_key, order_id).execute()
+                        updated_order = serialize_order(up_res.data[0]) if up_res.data else None
+
+                    if updated_order and buyer_id:
+                        self.create_notification(
+                            user_id=buyer_id,
+                            title="Order Rejected",
+                            message=f"Your order #{order_code} was rejected. Reason: {reason or 'Unable to fulfill at this time'}.",
+                            order_id=order_code,
+                            token=token
+                        )
+                    return updated_order
+
                 else:
-                    order_key = "order_id" if target_order.get("order_id") == order_id else "id"
-                    response = client.table("orders").update({"status": new_status}).eq(order_key, order_id).execute()
+                    update_data = {"status": new_status}
+                    if new_status == "Confirmed":
+                        update_data["confirmed_at"] = now_iso
+                    elif new_status == "Dispatched":
+                        update_data["dispatched_at"] = now_iso
+                    elif new_status == "Delivered":
+                        update_data["delivered_at"] = now_iso
+
+                    response = client.table("orders").update(update_data).eq(order_key, order_id).execute()
                     if not response.data:
                         return None
-                    return serialize_order(response.data[0])
+                    updated_order = serialize_order(response.data[0])
+
+                    # Trigger notifications
+                    if new_status == "Confirmed" and buyer_id:
+                        self.create_notification(
+                            user_id=buyer_id,
+                            title="Order Accepted",
+                            message=f"Your order #{order_code} for {crop_name} was accepted by the farmer.",
+                            order_id=order_code,
+                            token=token
+                        )
+                    elif new_status == "Dispatched" and buyer_id:
+                        self.create_notification(
+                            user_id=buyer_id,
+                            title="Order Dispatched",
+                            message=f"Your order #{order_code} has been dispatched! Track your delivery.",
+                            order_id=order_code,
+                            token=token
+                        )
+                    elif new_status == "Delivered":
+                        if farmer_id:
+                            self.create_notification(
+                                user_id=farmer_id,
+                                title="Order Delivered",
+                                message=f"Order #{order_code} for {crop_name} has been marked as delivered.",
+                                order_id=order_code,
+                                token=token
+                            )
+                        if buyer_id:
+                            self.create_notification(
+                                user_id=buyer_id,
+                                title="Order Delivered",
+                                message=f"Your order #{order_code} has been marked as delivered. Enjoy your farm-fresh harvest!",
+                                order_id=order_code,
+                                token=token
+                            )
+
+                    return updated_order
+
             except Exception as e:
                 logger.error(f"Failed to update order status: {e}", exc_info=True)
                 raise DatabaseError(f"Database error updating order status: {e}")
 
-        # Memory store
+        # Memory store (Dev / Tests)
         for idx, o in enumerate(self._orders_store):
             if o.get("order_id") == order_id or o.get("id") == order_id:
-                if new_status == "Cancelled" and previous_status in ("Cancelled", "Delivered"):
-                    raise ValueError(f"Cannot cancel order with status {previous_status}")
+                if new_status in ("Cancelled", "Rejected") and previous_status in ("Cancelled", "Rejected", "Delivered"):
+                    raise ValueError(f"Cannot update order with status {previous_status}")
+
                 self._orders_store[idx]["status"] = new_status
-                # Restore stock on cancellation
-                if new_status == "Cancelled" and previous_status != "Cancelled" and produce_id:
-                    for p_idx, prod in enumerate(self._produce_store):
-                        if prod.get("id") == produce_id:
-                            self._produce_store[p_idx]["quantity"] = round(
-                                float(prod.get("quantity", 0)) + order_qty, 2
-                            )
-                            break
+
+                if new_status == "Cancelled":
+                    self._orders_store[idx]["cancelled_at"] = now_iso
+                    if previous_status != "Cancelled" and produce_id:
+                        for p_idx, prod in enumerate(self._produce_store):
+                            if prod.get("id") == produce_id:
+                                self._produce_store[p_idx]["quantity"] = round(
+                                    float(prod.get("quantity", 0)) + order_qty, 2
+                                )
+                                break
+                    if farmer_id:
+                        self.create_notification(
+                            user_id=farmer_id,
+                            title="Order Cancelled",
+                            message=f"Order #{order_code} was cancelled by buyer. Crop inventory has been restored.",
+                            order_id=order_code
+                        )
+
+                elif new_status == "Rejected":
+                    self._orders_store[idx]["rejected_at"] = now_iso
+                    self._orders_store[idx]["rejection_reason"] = reason or "Unable to fulfill"
+                    if previous_status != "Rejected" and produce_id:
+                        for p_idx, prod in enumerate(self._produce_store):
+                            if prod.get("id") == produce_id:
+                                self._produce_store[p_idx]["quantity"] = round(
+                                    float(prod.get("quantity", 0)) + order_qty, 2
+                                )
+                                break
+                    if buyer_id:
+                        self.create_notification(
+                            user_id=buyer_id,
+                            title="Order Rejected",
+                            message=f"Your order #{order_code} was rejected. Reason: {reason or 'Unable to fulfill at this time'}.",
+                            order_id=order_code
+                        )
+
+                elif new_status == "Confirmed":
+                    self._orders_store[idx]["confirmed_at"] = now_iso
+                    if buyer_id:
+                        self.create_notification(
+                            user_id=buyer_id,
+                            title="Order Accepted",
+                            message=f"Your order #{order_code} for {crop_name} was accepted by the farmer.",
+                            order_id=order_code
+                        )
+
+                elif new_status == "Dispatched":
+                    self._orders_store[idx]["dispatched_at"] = now_iso
+                    if buyer_id:
+                        self.create_notification(
+                            user_id=buyer_id,
+                            title="Order Dispatched",
+                            message=f"Your order #{order_code} has been dispatched! Track your delivery.",
+                            order_id=order_code
+                        )
+
+                elif new_status == "Delivered":
+                    self._orders_store[idx]["delivered_at"] = now_iso
+                    if farmer_id:
+                        self.create_notification(
+                            user_id=farmer_id,
+                            title="Order Delivered",
+                            message=f"Order #{order_code} has been marked as delivered.",
+                            order_id=order_code
+                        )
+                    if buyer_id:
+                        self.create_notification(
+                            user_id=buyer_id,
+                            title="Order Delivered",
+                            message=f"Your order #{order_code} has been marked as delivered. Enjoy your harvest!",
+                            order_id=order_code
+                        )
+
                 return serialize_order(self._orders_store[idx])
 
         return None
+
+    # =========================================================================
+    # NOTIFICATIONS OPERATIONS
+    # =========================================================================
+
+    def get_notifications_for_user(
+        self, user_id: str, token: Optional[str] = None
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """Fetches notifications for a user, returning (items, unread_count)."""
+        if Config.is_supabase_configured():
+            try:
+                client = self.get_client(token)
+                res = client.table("notifications").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(50).execute()
+                items = [serialize_notification(row) for row in (res.data or [])]
+                unread = sum(1 for n in items if not n.get("isRead"))
+                return items, unread
+            except Exception as e:
+                logger.warning(f"Failed to fetch notifications from Supabase: {e}")
+                # Fallback to memory store if table not yet migrated
+                matches = [n for n in self._notifications_store if n.get("user_id") == user_id]
+                matches.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+                items = [serialize_notification(n) for n in matches[:50]]
+                unread = sum(1 for n in items if not n.get("isRead"))
+                return items, unread
+
+        matches = [n for n in self._notifications_store if n.get("user_id") == user_id]
+        matches.sort(key=lambda x: str(x.get("created_at", "")), reverse=True)
+        items = [serialize_notification(n) for n in matches[:50]]
+        unread = sum(1 for n in items if not n.get("isRead"))
+        return items, unread
+
+    def mark_notification_read(
+        self, notification_id: str, user_id: str, token: Optional[str] = None
+    ) -> bool:
+        """Marks a single notification as read."""
+        if Config.is_supabase_configured():
+            try:
+                client = self.get_client(token)
+                client.table("notifications").update({"is_read": True}).eq("id", notification_id).eq("user_id", user_id).execute()
+                return True
+            except Exception as e:
+                logger.warning(f"Supabase mark_notification_read failed: {e}")
+
+        for n in self._notifications_store:
+            if n.get("id") == notification_id and n.get("user_id") == user_id:
+                n["is_read"] = True
+                return True
+        return False
+
+    def mark_all_notifications_read(
+        self, user_id: str, token: Optional[str] = None
+    ) -> bool:
+        """Marks all notifications for user as read."""
+        if Config.is_supabase_configured():
+            try:
+                client = self.get_client(token)
+                client.table("notifications").update({"is_read": True}).eq("user_id", user_id).execute()
+                return True
+            except Exception as e:
+                logger.warning(f"Supabase mark_all_notifications_read failed: {e}")
+
+        for n in self._notifications_store:
+            if n.get("user_id") == user_id:
+                n["is_read"] = True
+        return True
+
+    def create_notification(
+        self, user_id: str, title: str, message: str, order_id: Optional[str] = None, token: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Creates a notification record."""
+        record = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "title": title,
+            "message": message,
+            "order_id": order_id,
+            "is_read": False,
+            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat()
+        }
+        if Config.is_supabase_configured():
+            try:
+                client = self.get_client(token)
+                res = client.table("notifications").insert({
+                    "id": record["id"],
+                    "user_id": user_id,
+                    "title": title,
+                    "message": message,
+                    "order_id": order_id,
+                    "is_read": False
+                }).execute()
+                if res.data:
+                    return serialize_notification(res.data[0])
+            except Exception as e:
+                logger.warning(f"Could not insert notification into Supabase: {e}")
+
+        self._notifications_store.insert(0, record)
+        return serialize_notification(record)
 
 
 # Global singleton instance

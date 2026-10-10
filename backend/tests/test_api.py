@@ -177,24 +177,33 @@ def test_order_lifecycle_and_cancellation_restores_stock(client, buyer_auth_head
     order = order_res.get_json()["data"]
     order_id = order["orderId"]
 
+    assert order["status"] == "Pending"
+
     # Verify stock decremented
     stock_after_order = float(db.get_produce_by_id("prod-2")["quantity"])
     assert stock_after_order == 240.0
 
-    # 2. Farmer transitions: Confirmed -> Dispatched
+    # 2. Farmer accepts order: Pending -> Confirmed
+    res_conf = client.patch(f"/api/orders/{order_id}/status", json={
+        "status": "Confirmed"
+    }, headers=farmer_auth_headers)
+    assert res_conf.status_code == 200
+    assert res_conf.get_json()["data"]["status"] == "Confirmed"
+
+    # 3. Farmer dispatches: Confirmed -> Dispatched
     res = client.patch(f"/api/orders/{order_id}/status", json={
         "status": "Dispatched"
     }, headers=farmer_auth_headers)
     assert res.status_code == 200
     assert res.get_json()["data"]["status"] == "Dispatched"
 
-    # 3. Invalid transition: Dispatched -> Pending (rejected)
+    # 4. Invalid transition: Dispatched -> Pending (rejected)
     res_invalid = client.patch(f"/api/orders/{order_id}/status", json={
         "status": "Pending"
     }, headers=farmer_auth_headers)
     assert res_invalid.status_code == 400
 
-    # 4. Farmer completes delivery: Dispatched -> Delivered
+    # 5. Farmer completes delivery: Dispatched -> Delivered
     res_deliv = client.patch(f"/api/orders/{order_id}/status", json={
         "status": "Delivered"
     }, headers=farmer_auth_headers)
@@ -216,10 +225,7 @@ def test_buyer_cancellation_restores_stock(client, buyer_auth_headers, farmer_au
     # Stock is decremented by 50
     prod_before = float(db.get_produce_by_id("prod-4")["quantity"])
 
-    # Set status to Pending so buyer can cancel
-    db.update_order_status(order_id, "Pending")
-
-    # Buyer cancels order
+    # Buyer cancels pending order
     cancel_res = client.patch(f"/api/orders/{order_id}/status", json={
         "status": "Cancelled"
     }, headers=buyer_auth_headers)
@@ -342,4 +348,102 @@ def test_structured_json_logger():
     assert parsed["logger"] == "agrimandi.test"
     assert parsed["message"] == "User buyer-1 logged in"
     assert "timestamp" in parsed
+
+
+def test_farmer_reject_order_with_reason(client, buyer_auth_headers, farmer_auth_headers):
+    """Farmer rejects a pending order, providing a reason and restoring stock."""
+    # Place order
+    prod_id = "prod-3"
+    stock_start = float(db.get_produce_by_id(prod_id)["quantity"])
+
+    order_res = client.post("/api/orders", json={
+        "produceId": prod_id,
+        "quantity": 5.0,
+        "deliveryAddress": "Sector 4, Rohini, New Delhi"
+    }, headers=buyer_auth_headers)
+    assert order_res.status_code == 201
+    order_id = order_res.get_json()["data"]["orderId"]
+
+    stock_after_order = float(db.get_produce_by_id(prod_id)["quantity"])
+    assert stock_after_order == stock_start - 5.0
+
+    # Farmer rejects with reason
+    rej_res = client.patch(f"/api/orders/{order_id}/status", json={
+        "status": "Rejected",
+        "reason": "Crop damaged due to unexpected rainfall"
+    }, headers=farmer_auth_headers)
+
+    assert rej_res.status_code == 200
+    rej_data = rej_res.get_json()["data"]
+    assert rej_data["status"] == "Rejected"
+    assert rej_data["rejectionReason"] == "Crop damaged due to unexpected rainfall"
+    assert rej_data["rejectedAt"] != ""
+
+    # Stock is restored
+    stock_after_reject = float(db.get_produce_by_id(prod_id)["quantity"])
+    assert stock_after_reject == stock_start
+
+
+def test_buyer_confirms_received_dispatched_order(client, buyer_auth_headers, farmer_auth_headers):
+    """Buyer can press 'I received this order' when order is in Dispatched status."""
+    order_res = client.post("/api/orders", json={
+        "produceId": "prod-1",
+        "quantity": 2.0,
+        "deliveryAddress": "MG Road, Pune, Maharashtra"
+    }, headers=buyer_auth_headers)
+    assert order_res.status_code == 201
+    order_id = order_res.get_json()["data"]["orderId"]
+
+    # Farmer confirms and dispatches
+    client.patch(f"/api/orders/{order_id}/status", json={"status": "Confirmed"}, headers=farmer_auth_headers)
+    client.patch(f"/api/orders/{order_id}/status", json={"status": "Dispatched"}, headers=farmer_auth_headers)
+
+    # Buyer marks as delivered
+    deliv_res = client.patch(f"/api/orders/{order_id}/status", json={
+        "status": "Delivered"
+    }, headers=buyer_auth_headers)
+
+    assert deliv_res.status_code == 200
+    deliv_data = deliv_res.get_json()["data"]
+    assert deliv_data["status"] == "Delivered"
+    assert deliv_data["deliveredAt"] != ""
+
+
+def test_cart_batch_checkout(client, buyer_auth_headers):
+    """Cart checkout endpoint creates multiple orders in sequence."""
+    checkout_res = client.post("/api/orders/checkout", json={
+        "deliveryAddress": "B-404, Green Park, Bangalore",
+        "items": [
+            {"produceId": "prod-1", "quantity": 1.0},
+            {"produceId": "prod-2", "quantity": 3.0}
+        ]
+    }, headers=buyer_auth_headers)
+
+    assert checkout_res.status_code == 201
+    data = checkout_res.get_json()
+    assert data["success"] is True
+    assert len(data["data"]) == 2
+    assert len(data["orderIds"]) == 2
+
+
+def test_notifications_lifecycle(client, buyer_auth_headers):
+    """Notifications retrieval, read status update, and mark all read."""
+    # Fetch notifications for buyer
+    get_res = client.get("/api/notifications", headers=buyer_auth_headers)
+    assert get_res.status_code == 200
+    data = get_res.get_json()
+    assert data["success"] is True
+    assert isinstance(data["data"], list)
+
+    # If notifications exist, mark one read
+    if data["data"]:
+        notif_id = data["data"][0]["id"]
+        patch_res = client.patch(f"/api/notifications/{notif_id}/read", headers=buyer_auth_headers)
+        assert patch_res.status_code == 200
+
+    # Mark all read
+    all_read_res = client.post("/api/notifications/mark-all-read", headers=buyer_auth_headers)
+    assert all_read_res.status_code == 200
+    assert all_read_res.get_json()["success"] is True
+
 

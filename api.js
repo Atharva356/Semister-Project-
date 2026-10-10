@@ -169,10 +169,38 @@
         });
       },
 
-      async updateStatus(id, status) {
+      async checkout(checkoutData) {
+        return apiFetch("/api/orders/checkout", {
+          method: "POST",
+          body: JSON.stringify(checkoutData)
+        });
+      },
+
+      async updateStatus(id, status, reason = null) {
+        const body = { status };
+        if (reason) body.reason = reason;
         return apiFetch(`/api/orders/${encodeURIComponent(id)}/status`, {
           method: "PATCH",
-          body: JSON.stringify({ status })
+          body: JSON.stringify(body)
+        });
+      }
+    },
+
+    // Notifications endpoints
+    notifications: {
+      async list(silent = true) {
+        return apiFetch("/api/notifications", { silent });
+      },
+
+      async markRead(id) {
+        return apiFetch(`/api/notifications/${encodeURIComponent(id)}/read`, {
+          method: "PATCH"
+        });
+      },
+
+      async markAllRead() {
+        return apiFetch("/api/notifications/mark-all-read", {
+          method: "POST"
         });
       }
     }

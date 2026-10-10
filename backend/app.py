@@ -10,6 +10,7 @@ from config import Config
 from logger import configure_logging
 from routes.produce import produce_bp
 from routes.orders import orders_bp
+from routes.notifications import notifications_bp
 
 # Configure structured JSON logging
 logger = configure_logging(debug=Config.DEBUG)
@@ -39,6 +40,7 @@ def create_app(config_class=Config) -> Flask:
     # Register Blueprints
     app.register_blueprint(produce_bp, url_prefix="/api/produce")
     app.register_blueprint(orders_bp, url_prefix="/api/orders")
+    app.register_blueprint(notifications_bp, url_prefix="/api/notifications")
 
     # --------------------------------------------------------------------------
     # Request Logging
@@ -74,7 +76,8 @@ def create_app(config_class=Config) -> Flask:
             "endpoints": {
                 "health": "/api/health",
                 "produce": "/api/produce",
-                "orders": "/api/orders"
+                "orders": "/api/orders",
+                "notifications": "/api/notifications"
             }
         }), 200
 

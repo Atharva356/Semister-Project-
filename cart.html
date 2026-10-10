@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Order Confirmed — AgriMandi</title>
-  <meta name="description" content="Your direct farm order has been successfully placed on AgriMandi." />
+  <title>Shopping Cart — AgriMandi</title>
+  <meta name="description" content="Review your selected farm produce, adjust quantities, and place direct orders." />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body class="has-mobile-nav">
@@ -61,39 +61,22 @@
   <main class="main-content">
     <div class="container">
       
-      <div class="success-wrapper">
-        <div class="success-card">
-          <div class="success-icon-wrapper">
-            ✓
-          </div>
-
-          <h1 class="success-title">Order Placed Successfully!</h1>
-          <p class="success-subtitle">
-            Thank you for supporting local growers directly. Your order has been notified to the farmer for confirmation and dispatch.
-          </p>
-
-          <!-- Prominent Order Code Display -->
-          <div id="successOrderCodeBadge" style="display: inline-block; margin-bottom: 20px; padding: 8px 18px; background: var(--primary-light); color: var(--primary); font-weight: 800; font-size: 1.15rem; border-radius: var(--radius-full); border: 1px solid var(--primary-subtle);">
-            Order #AGRI-...
-          </div>
-
-          <!-- Dynamic Order Summary Details -->
-          <div class="order-summary-box" id="orderSummaryDetails">
-            <!-- Rendered by app.js -->
-          </div>
-
-          <div class="success-actions" style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; margin-top: 24px;">
-            <a href="order-detail.html" id="trackOrderActionBtn" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 6px;">
-              📦 Track Order
-            </a>
-            <a href="buyer-dashboard.html" class="btn btn-outline">
-              🛒 Continue Shopping
-            </a>
-            <a href="orders.html" class="btn btn-outline">
-              📋 View All Orders
-            </a>
-          </div>
+      <div class="dashboard-header">
+        <div class="dashboard-title-group">
+          <h1>🛒 Your Produce Cart</h1>
+          <p>Review items, adjust quantities, and order directly from local farmers.</p>
         </div>
+        <div>
+          <a href="buyer-dashboard.html" class="btn btn-outline btn-sm">
+            ← Continue Shopping
+          </a>
+        </div>
+      </div>
+
+      <!-- Cart Content Container -->
+      <div id="cartContainer">
+        <!-- Dynamic: populated by app.js (Empty State OR Items + Summary) -->
+        <div class="loading-spinner"></div>
       </div>
 
     </div>
@@ -106,7 +89,7 @@
         <span class="mobile-nav-icon">🌾</span>
         <span>Shop</span>
       </a>
-      <a href="cart.html" class="mobile-nav-link">
+      <a href="cart.html" class="mobile-nav-link active">
         <span class="mobile-nav-icon">🛒</span>
         <span>Cart</span>
         <span class="mobile-nav-badge" id="mobileNavCartBadge" style="display: none;">0</span>
@@ -130,6 +113,21 @@
   <!-- Site Footer -->
   <footer class="site-footer">
     <div class="container">
+      <div class="footer-top">
+        <div class="footer-brand">
+          <div class="logo">
+            <span class="logo-icon">🌾</span>
+            <span>AgriMandi</span>
+          </div>
+          <p>Direct Farmer-to-Buyer Produce Marketplace</p>
+        </div>
+        <ul class="footer-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="buyer-dashboard.html">Marketplace</a></li>
+          <li><a href="orders.html">My Orders</a></li>
+          <li><a href="farmer-dashboard.html">Farmer Portal</a></li>
+        </ul>
+      </div>
       <div class="footer-bottom">
         <p>&copy; 2026 AgriMandi. All rights reserved. Direct Farmer-to-Buyer Marketplace.</p>
       </div>

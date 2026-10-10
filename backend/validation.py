@@ -7,15 +7,16 @@ from typing import Any, Dict, Optional, Tuple
 
 VALID_CATEGORIES = {"Vegetables", "Fruits", "Grains", "Pulses", "Spices"}
 VALID_UNITS = {"Kg", "Quintal", "Crates", "Ton"}
-VALID_ORDER_STATUSES = {"Pending", "Confirmed", "Dispatched", "Delivered", "Cancelled"}
+VALID_ORDER_STATUSES = {"Pending", "Confirmed", "Dispatched", "Delivered", "Cancelled", "Rejected"}
 
 # State machine transitions
 VALID_STATUS_TRANSITIONS = {
-    "Pending": {"Confirmed", "Cancelled"},
+    "Pending": {"Confirmed", "Cancelled", "Rejected"},
     "Confirmed": {"Dispatched", "Cancelled"},
     "Dispatched": {"Delivered"},
     "Delivered": set(),
-    "Cancelled": set()
+    "Cancelled": set(),
+    "Rejected": set()
 }
 
 def validate_produce_create(data: Dict[str, Any]) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
@@ -181,7 +182,52 @@ def validate_status_transition(current_status: str, new_status: str, role: str) 
     if new_status not in allowed_next:
         return False, f"Cannot transition order status from '{current_status}' to '{new_status}'"
 
-    if role == "buyer" and new_status != "Cancelled":
-        return False, "Buyers are only allowed to cancel their orders"
+    if role == "buyer":
+        # Buyer may cancel pending order OR confirm receipt of dispatched order
+        if current_status == "Pending" and new_status == "Cancelled":
+            return True, None
+        if current_status == "Dispatched" and new_status == "Delivered":
+            return True, None
+        return False, "Buyers can only cancel pending orders or confirm receipt of dispatched orders"
 
     return True, None
+
+
+def validate_checkout_create(data: Dict[str, Any]) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+    """Validates batch cart checkout payload."""
+    if not isinstance(data, dict):
+        return False, "Payload must be a JSON object", None
+
+    delivery_address = str(data.get("deliveryAddress") or data.get("delivery_address") or "").strip()
+    if not delivery_address or len(delivery_address) < 5 or len(delivery_address) > 300:
+        return False, "Delivery address is required (between 5 and 300 characters)", None
+
+    raw_items = data.get("items")
+    if not isinstance(raw_items, list) or len(raw_items) == 0:
+        return False, "Cart checkout requires at least one item in 'items'", None
+
+    validated_items = []
+    for idx, item in enumerate(raw_items):
+        if not isinstance(item, dict):
+            return False, f"Item at index {idx} must be an object", None
+
+        produce_id = str(item.get("produceId") or item.get("produce_id") or "").strip()
+        if not produce_id:
+            return False, f"Produce ID is required for item at index {idx}", None
+
+        try:
+            qty = float(item.get("quantity", 0))
+            if qty <= 0:
+                return False, f"Quantity must be greater than zero for item at index {idx}", None
+        except (ValueError, TypeError):
+            return False, f"Invalid quantity for item at index {idx}", None
+
+        validated_items.append({
+            "produce_id": produce_id,
+            "quantity": round(qty, 2)
+        })
+
+    return True, None, {
+        "delivery_address": delivery_address,
+        "items": validated_items
+    }

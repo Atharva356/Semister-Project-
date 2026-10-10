@@ -7,7 +7,7 @@ import logging
 from flask import Blueprint, g, jsonify, request
 from auth import require_auth, require_role
 from db import DatabaseError, db, serialize_order
-from validation import validate_order_create, validate_status_transition
+from validation import validate_checkout_create, validate_order_create, validate_status_transition
 
 logger = logging.getLogger("agrimandi.routes.orders")
 orders_bp = Blueprint("orders", __name__)
@@ -114,6 +114,49 @@ def create_order():
         return jsonify({"success": False, "error": f"Failed to place order: {error_text}"}), 500
 
 
+@orders_bp.route("/checkout", methods=["POST"])
+@require_role("buyer")
+def checkout_orders():
+    """
+    POST /api/orders/checkout
+    Places multiple orders from the buyer's shopping cart.
+    Requires authenticated 'buyer' role.
+    """
+    data = request.get_json(silent=True) or {}
+    is_valid, err_msg, validated = validate_checkout_create(data)
+    if not is_valid:
+        return jsonify({"success": False, "error": err_msg}), 400
+
+    created_orders = []
+    delivery_address = validated["delivery_address"]
+    items = validated["items"]
+
+    try:
+        for item in items:
+            order = db.place_order(
+                produce_id=item["produce_id"],
+                quantity=item["quantity"],
+                buyer_id=g.user_id,
+                buyer_name=g.user_name,
+                buyer_email=g.user_email,
+                delivery_address=delivery_address,
+                token=getattr(g, "token", None)
+            )
+            created_orders.append(order)
+
+        return jsonify({
+            "success": True,
+            "message": f"Successfully placed {len(created_orders)} order(s)",
+            "data": created_orders,
+            "orderIds": [o.get("orderId") or o.get("id") for o in created_orders]
+        }), 201
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    except DatabaseError as e:
+        logger.error(f"Database error during checkout: {e}")
+        return jsonify({"success": False, "error": f"Failed to place order: {e}"}), 500
+
+
 @orders_bp.route("/<order_id>/status", methods=["PATCH", "PUT"])
 @require_auth
 def update_order_status(order_id):
@@ -121,13 +164,14 @@ def update_order_status(order_id):
     PATCH/PUT /api/orders/<order_id>/status
     Updates fulfillment status of an order.
     Rules:
-      - Farmers can transition: Pending -> Confirmed -> Dispatched -> Delivered, or Cancelled from Pending/Confirmed.
-      - Buyers can only Cancel their own order if it is in Pending status.
-      - Stock is restored on cancellation.
-    Payload: { "status": "Dispatched" }
+      - Farmers can transition: Pending -> Confirmed, Rejected, or Cancelled; Confirmed -> Dispatched; Dispatched -> Delivered.
+      - Buyers can Cancel their own order while Pending, or confirm receipt (Dispatched -> Delivered).
+      - Stock is restored on cancellation and rejection.
+    Payload: { "status": "Dispatched", "reason": "Optional rejection reason" }
     """
     data = request.get_json(silent=True) or {}
     new_status = data.get("status")
+    reason = data.get("reason")
 
     if not new_status:
         return jsonify({"success": False, "error": "Status field is required"}), 400
@@ -151,12 +195,22 @@ def update_order_status(order_id):
         if buyer_id and buyer_id != g.user_id:
             return jsonify({
                 "success": False,
-                "error": "Forbidden: You can only cancel your own orders"
+                "error": "Forbidden: You can only update your own orders"
             }), 403
-        if current_status != "Pending" or new_status != "Cancelled":
+        if new_status == "Cancelled" and current_status != "Pending":
             return jsonify({
                 "success": False,
                 "error": "Buyers can only cancel orders that are currently in 'Pending' status"
+            }), 400
+        if new_status == "Delivered" and current_status != "Dispatched":
+            return jsonify({
+                "success": False,
+                "error": "Buyers can only confirm receipt of orders that are currently 'Dispatched'"
+            }), 400
+        if new_status not in ("Cancelled", "Delivered"):
+            return jsonify({
+                "success": False,
+                "error": "Buyers can only cancel pending orders or mark dispatched orders as delivered"
             }), 400
     else:
         return jsonify({"success": False, "error": "Forbidden: Unrecognized role"}), 403
@@ -167,7 +221,7 @@ def update_order_status(order_id):
         return jsonify({"success": False, "error": transition_err}), 400
 
     try:
-        updated = db.update_order_status(order_id, new_status, token=getattr(g, "token", None))
+        updated = db.update_order_status(order_id, new_status, reason=reason, token=getattr(g, "token", None))
         if not updated:
             return jsonify({"success": False, "error": "Order status could not be updated"}), 404
 
