@@ -124,6 +124,78 @@ CREATE TABLE IF NOT EXISTS public.orders (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
 );
 
+-- Ensure all columns exist even if tables already existed previously from earlier prototype
+DO $$
+BEGIN
+    -- Produce table renames
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='produce' AND column_name='farmerName') THEN
+        ALTER TABLE public.produce RENAME COLUMN "farmerName" TO farmer_name;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='produce' AND column_name='farmerId') THEN
+        ALTER TABLE public.produce RENAME COLUMN "farmerId" TO farmer_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='produce' AND column_name='dateAdded') THEN
+        ALTER TABLE public.produce RENAME COLUMN "dateAdded" TO date_added;
+    END IF;
+
+    -- Orders table renames
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='orderId') THEN
+        ALTER TABLE public.orders RENAME COLUMN "orderId" TO order_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='orderDate') THEN
+        ALTER TABLE public.orders RENAME COLUMN "orderDate" TO order_date;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='produceId') THEN
+        ALTER TABLE public.orders RENAME COLUMN "produceId" TO produce_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='produceName') THEN
+        ALTER TABLE public.orders RENAME COLUMN "produceName" TO produce_name;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='unitPrice') THEN
+        ALTER TABLE public.orders RENAME COLUMN "unitPrice" TO unit_price;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='totalPrice') THEN
+        ALTER TABLE public.orders RENAME COLUMN "totalPrice" TO total_price;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='farmerId') THEN
+        ALTER TABLE public.orders RENAME COLUMN "farmerId" TO farmer_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='farmerName') THEN
+        ALTER TABLE public.orders RENAME COLUMN "farmerName" TO farmer_name;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='farmerLocation') THEN
+        ALTER TABLE public.orders RENAME COLUMN "farmerLocation" TO farmer_location;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='buyerId') THEN
+        ALTER TABLE public.orders RENAME COLUMN "buyerId" TO buyer_id;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='buyerName') THEN
+        ALTER TABLE public.orders RENAME COLUMN "buyerName" TO buyer_name;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='buyerEmail') THEN
+        ALTER TABLE public.orders RENAME COLUMN "buyerEmail" TO buyer_email;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='deliveryAddress') THEN
+        ALTER TABLE public.orders RENAME COLUMN "deliveryAddress" TO delivery_address;
+    END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='orders' AND column_name='estimatedDelivery') THEN
+        ALTER TABLE public.orders RENAME COLUMN "estimatedDelivery" TO estimated_delivery;
+    END IF;
+END $$;
+
+-- Guarantee required foreign key and identity columns exist
+ALTER TABLE public.produce ADD COLUMN IF NOT EXISTS farmer_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS produce_id TEXT REFERENCES public.produce(id) ON DELETE SET NULL;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS farmer_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS buyer_id UUID REFERENCES auth.users(id) ON DELETE CASCADE;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS farmer_name TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS farmer_location TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS buyer_name TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS buyer_email TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS delivery_address TEXT;
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS estimated_delivery TEXT DEFAULT '3-5 Business Days';
+ALTER TABLE public.orders ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Confirmed';
+
 -- Trigger Function: Enforce immutable fields and state transitions on orders
 CREATE OR REPLACE FUNCTION public.check_order_update()
 RETURNS TRIGGER AS $$
